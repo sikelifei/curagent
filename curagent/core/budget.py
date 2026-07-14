@@ -1,4 +1,4 @@
-"""Atomic task-tree shared budget accounting."""
+"""Atomic shared model-output accounting for one complete task tree."""
 
 from __future__ import annotations
 
@@ -11,58 +11,46 @@ from curagent.core.types import AgentLimits
 
 @dataclass(frozen=True)
 class BudgetSnapshot:
-    model_calls_used: int
-    tool_calls_used: int
-    children_used: int
-    model_calls_remaining: int
-    tool_calls_remaining: int
-    children_remaining: int
-
-    def remaining_dict(self) -> dict[str, int]:
-        return {
-            "model_calls": self.model_calls_remaining,
-            "tool_calls": self.tool_calls_remaining,
-            "children": self.children_remaining,
-        }
+    total_steps_used: int
+    remaining_steps: int
 
 
 class SharedBudget:
-    """One atomic budget shared by the root and every descendant."""
+    """Reserve one shared step before a model call and release it if no output arrives."""
 
     def __init__(self, limits: AgentLimits) -> None:
         self.limits = limits
-        self._model_calls = 0
-        self._tool_calls = 0
-        self._children = 0
+        self._total_steps = 0
+        self._next_reservation = 0
+        self._pending: set[int] = set()
         self._lock = asyncio.Lock()
 
-    async def consume_model_call(self) -> None:
+    async def reserve_step(self) -> int:
         async with self._lock:
-            if self._model_calls >= self.limits.max_model_calls_total:
-                raise BudgetExceeded("model_calls")
-            self._model_calls += 1
+            if self._total_steps >= self.limits.max_total_steps:
+                raise BudgetExceeded("max_total_steps")
+            self._total_steps += 1
+            self._next_reservation += 1
+            reservation = self._next_reservation
+            self._pending.add(reservation)
+            return reservation
 
-    async def consume_tool_call(self) -> None:
+    async def commit_step(self, reservation: int) -> None:
         async with self._lock:
-            if self._tool_calls >= self.limits.max_tool_calls_total:
-                raise BudgetExceeded("tool_calls")
-            self._tool_calls += 1
+            if reservation not in self._pending:
+                raise RuntimeError(f"unknown step reservation: {reservation}")
+            self._pending.remove(reservation)
 
-    async def reserve_children(self, count: int) -> None:
-        if count < 0:
-            raise ValueError("child reservation must be non-negative")
+    async def release_step(self, reservation: int) -> None:
         async with self._lock:
-            if self._children + count > self.limits.max_children_total:
-                raise BudgetExceeded("children")
-            self._children += count
+            if reservation not in self._pending:
+                raise RuntimeError(f"unknown step reservation: {reservation}")
+            self._pending.remove(reservation)
+            self._total_steps -= 1
 
     async def snapshot(self) -> BudgetSnapshot:
         async with self._lock:
             return BudgetSnapshot(
-                model_calls_used=self._model_calls,
-                tool_calls_used=self._tool_calls,
-                children_used=self._children,
-                model_calls_remaining=max(0, self.limits.max_model_calls_total - self._model_calls),
-                tool_calls_remaining=max(0, self.limits.max_tool_calls_total - self._tool_calls),
-                children_remaining=max(0, self.limits.max_children_total - self._children),
+                total_steps_used=self._total_steps,
+                remaining_steps=max(0, self.limits.max_total_steps - self._total_steps),
             )

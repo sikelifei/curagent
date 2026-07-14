@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import ast
+import asyncio
 import os
 import shutil
-import subprocess
 import sys
 import tempfile
+from typing import Any
 
-from curagent.core.types import Effect, ExecutionReceipt, ReceiptStatus, ToolCall
+from curagent.core.types import ToolCall
 
 
 _DENIED_IMPORTS = {
@@ -33,28 +34,16 @@ class PythonExecutor:
         self.timeout_s = timeout_s
         self.memory_mb = memory_mb
 
-    async def execute(self, call: ToolCall) -> ExecutionReceipt:
+    async def execute(self, call: ToolCall) -> Any:
         code = call.arguments["code"]
         policy_error = self._policy_error(code)
         if policy_error:
-            return ExecutionReceipt(
-                call_id=call.call_id,
-                status=ReceiptStatus.REJECTED,
-                effect=Effect.NO_CHANGE,
-                error=policy_error,
-                metadata={"error_type": "python_policy"},
-            )
+            return policy_error
 
         with tempfile.TemporaryDirectory(prefix="curagent-python-") as directory:
             prlimit = shutil.which("prlimit")
             if prlimit is None:
-                return ExecutionReceipt(
-                    call_id=call.call_id,
-                    status=ReceiptStatus.FAILED,
-                    effect=Effect.NO_CHANGE,
-                    error="python executor requires the prlimit executable",
-                    metadata={"error_type": "python_configuration"},
-                )
+                return "python executor requires the prlimit executable"
             memory = self.memory_mb * 1024 * 1024
             cpu = max(1, int(self.timeout_s))
             command = [
@@ -70,49 +59,30 @@ class PythonExecutor:
                 code,
             ]
             try:
-                process = subprocess.run(
-                    command,
+                process = await asyncio.create_subprocess_exec(
+                    *command,
                     cwd=directory,
                     env={"PATH": os.environ.get("PATH", ""), "PYTHONIOENCODING": "utf-8"},
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    timeout=self.timeout_s,
-                    check=False,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(), timeout=self.timeout_s
                 )
             except OSError as exc:
-                return ExecutionReceipt(
-                    call_id=call.call_id,
-                    status=ReceiptStatus.FAILED,
-                    effect=Effect.NO_CHANGE,
-                    error=f"could not start isolated Python: {exc}",
-                    metadata={"error_type": "python_configuration"},
-                )
-            except subprocess.TimeoutExpired:
-                return ExecutionReceipt(
-                    call_id=call.call_id,
-                    status=ReceiptStatus.FAILED,
-                    effect=Effect.NO_CHANGE,
-                    error=f"python execution timed out after {self.timeout_s}s",
-                    metadata={"error_type": "python_timeout"},
-                )
-        output = process.stdout.decode("utf-8", errors="replace")
-        error = process.stderr.decode("utf-8", errors="replace")
-        if process.returncode != 0:
-            return ExecutionReceipt(
-                call_id=call.call_id,
-                status=ReceiptStatus.FAILED,
-                effect=Effect.NO_CHANGE,
-                result={"stdout": output},
-                error=error or f"python exited with code {process.returncode}",
-                metadata={"error_type": "python_runtime", "returncode": process.returncode},
-            )
-        return ExecutionReceipt(
-            call_id=call.call_id,
-            status=ReceiptStatus.SUCCESS,
-            effect=Effect.NO_CHANGE,
-            result={"stdout": output, "stderr": error},
-            metadata={"returncode": process.returncode},
-        )
+                return f"could not start isolated Python: {exc}"
+            except asyncio.TimeoutError:
+                if process.returncode is None:
+                    process.kill()
+                    await process.wait()
+                return f"python execution timed out after {self.timeout_s}s"
+        output = stdout.decode("utf-8", errors="replace")
+        error = stderr.decode("utf-8", errors="replace")
+        return {
+            "stdout": output,
+            "stderr": error,
+            "returncode": process.returncode,
+        }
 
     @staticmethod
     def _policy_error(code: str) -> str | None:
@@ -128,6 +98,10 @@ class PythonExecutor:
                 denied = sorted(set(names) & _DENIED_IMPORTS)
                 if denied:
                     return f"imports are not allowed for pure computation: {denied}"
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in _DENIED_CALLS:
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id in _DENIED_CALLS
+            ):
                 return f"{node.func.id}() is not allowed for pure computation"
         return None

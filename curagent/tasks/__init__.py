@@ -1,5 +1,5 @@
-"""Task modules."""
+"""Task-specific environment tool schemas."""
 
-from curagent.tasks.webshop import WEBSHOP_TASK_MODULE
+from curagent.tasks.webshop import WEBSHOP_ENVIRONMENT_TOOLS
 
-__all__ = ["WEBSHOP_TASK_MODULE"]
+__all__ = ["WEBSHOP_ENVIRONMENT_TOOLS"]

@@ -8,5 +8,6 @@ planner:
     max_tokens: 512
     timeout: 120
     native_tools: true
+    tool_choice: required
     chat_template_kwargs:
       enable_thinking: false

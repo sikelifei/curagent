@@ -1,55 +1,31 @@
-"""Common environment contract."""
+"""Minimal optional shared-environment contract used by the generic harness."""
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from typing import Any, Sequence
 
-from curagent.core.types import (
-    AccessMode,
-    EnvCapabilities,
-    ExecutionReceipt,
-    Observation,
-    ToolCall,
-    ToolSchema,
-)
+from curagent.core.types import ToolCall, ToolSchema
 
 
 class Environment(ABC):
+    """A stateful resource shared by root, child, and grandchild nodes."""
+
     @abstractmethod
-    async def reset(self, instance: Any) -> Observation:
+    async def observe(self) -> Any:
         raise NotImplementedError
 
     @abstractmethod
-    async def observe(self) -> Observation:
+    def tools(self) -> Sequence[ToolSchema]:
         raise NotImplementedError
 
     @abstractmethod
-    def tools(self, access: AccessMode) -> Sequence[ToolSchema]:
-        raise NotImplementedError
-
-    @abstractmethod
-    async def execute(self, tool_call: ToolCall, expected_version: int) -> ExecutionReceipt:
-        raise NotImplementedError
-
-    @abstractmethod
-    async def reconcile(self, call_id: str) -> ExecutionReceipt | None:
+    async def execute(self, tool_call: ToolCall) -> Any:
         raise NotImplementedError
 
     @abstractmethod
     def is_done(self) -> bool:
         raise NotImplementedError
-
-    @abstractmethod
-    def reward(self) -> float:
-        raise NotImplementedError
-
-    @abstractmethod
-    def capabilities(self) -> EnvCapabilities:
-        raise NotImplementedError
-
-    def clone(self) -> "Environment | None":
-        return None
 
     async def close(self) -> None:
         return None

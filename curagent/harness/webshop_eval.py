@@ -1,4 +1,4 @@
-"""ReCode WebShop inference and 200-instance metric reporting."""
+"""Small or batch ReCode WebShop evaluation for the simplified harness."""
 
 from __future__ import annotations
 
@@ -15,10 +15,27 @@ from curagent.core.agent import AgentNode
 from curagent.core.budget import SharedBudget
 from curagent.core.model import ToolCallingModel
 from curagent.core.trace import TraceRecorder
-from curagent.core.types import AccessMode, AgentLimits
+from curagent.core.types import AgentLimits
 from curagent.environments.recode_webshop import ReCodeWebShopEnvironment
 from curagent.models.openai_compatible import OpenAICompatibleModel, load_model_config
-from curagent.tasks.webshop import WEBSHOP_TASK_MODULE
+
+
+def _trace_metrics(trace: Sequence[dict[str, Any]]) -> dict[str, int]:
+    tool_calls = 0
+    children = 0
+    for event in trace:
+        call = event.get("parsed_tool_call")
+        if not isinstance(call, dict):
+            continue
+        tool_calls += 1
+        if call.get("name") == "spawn_agent":
+            children += 1
+        elif call.get("name") == "spawn_agents":
+            arguments = call.get("arguments")
+            specs = arguments.get("specs") if isinstance(arguments, dict) else None
+            if isinstance(specs, list):
+                children += len(specs)
+    return {"tool_calls_observed": tool_calls, "children_spawned": children}
 
 
 async def run_episode(
@@ -40,37 +57,42 @@ async def run_episode(
     started = datetime.now(timezone.utc)
     try:
         observation = await environment.reset({"task_id": task_id, "split": split})
-        instruction = str(observation.metadata.get("instruction") or observation.text)
+        observation_value = observation.to_dict() if hasattr(observation, "to_dict") else observation
+        metadata = observation_value.get("metadata", {}) if isinstance(observation_value, dict) else {}
+        instruction = str(metadata.get("instruction") or getattr(observation, "text", observation_value))
         agent = AgentNode(
             agent_id="root",
             task=instruction,
             context={"task_id": task_id, "split": split},
             environment=environment,
             model=model,
-            task_module=WEBSHOP_TASK_MODULE,
             limits=limits,
             budget=budget,
             trace=trace,
-            access=AccessMode.OWNER,
         )
         result = await agent.run()
         reward = environment.reward()
         final_observation = await environment.observe()
+        final_observation_value = (
+            final_observation.to_dict()
+            if hasattr(final_observation, "to_dict")
+            else final_observation
+        )
         snapshot = await budget.snapshot()
+        events = trace.all()
         episode = {
             "task_id": task_id,
-            "status": result.status.value,
+            "status": "ok" if result.error is None else "error",
             "result": result.result,
             "error": result.error,
             "reward": reward,
             "success": reward >= 1.0,
-            "final_observation": final_observation.to_dict(),
-            "model_calls": snapshot.model_calls_used,
-            "tool_calls": snapshot.tool_calls_used,
-            "children": snapshot.children_used,
+            "final_observation": final_observation_value,
+            "total_steps": snapshot.total_steps_used,
+            **_trace_metrics(events),
             "elapsed_s": (datetime.now(timezone.utc) - started).total_seconds(),
         }
-        return episode, trace.all()
+        return episode, events
     finally:
         await environment.close()
 
@@ -114,9 +136,9 @@ async def run_eval(
                     "error": f"episode runtime error: {exc}",
                     "reward": 0.0,
                     "success": False,
-                    "model_calls": 0,
-                    "tool_calls": 0,
-                    "children": 0,
+                    "total_steps": 0,
+                    "tool_calls_observed": 0,
+                    "children_spawned": 0,
                     "elapsed_s": 0.0,
                 }
                 trace = []
@@ -149,13 +171,17 @@ async def run_eval(
                             "task_id": task_id,
                             "status": episode["status"],
                             "reward": episode["reward"],
+                            "steps": episode["total_steps"],
+                            "children": episode["children_spawned"],
                         },
                         ensure_ascii=False,
                     ),
                     flush=True,
                 )
 
-    await asyncio.gather(*(one(index, str(task_id)) for index, task_id in enumerate(task_ids)))
+    await asyncio.gather(
+        *(one(index, str(task_id)) for index, task_id in enumerate(task_ids))
+    )
     ordered = [episodes[index] for index in range(len(task_ids))]
     return _build_report(
         ordered,
@@ -179,13 +205,19 @@ def summarize(episodes: Sequence[dict[str, Any]], *, requested: int) -> dict[str
         "average_reward": statistics.fmean(rewards) if rewards else 0.0,
         "median_reward": statistics.median(rewards) if rewards else 0.0,
         "success_count": sum(reward >= 1.0 for reward in rewards),
-        "success_rate": sum(reward >= 1.0 for reward in rewards) / len(rewards) if rewards else 0.0,
+        "success_rate": (
+            sum(reward >= 1.0 for reward in rewards) / len(rewards) if rewards else 0.0
+        ),
         "zero_reward_count": sum(reward == 0.0 for reward in rewards),
         "reward_at_least_0_5_count": sum(reward >= 0.5 for reward in rewards),
         "status_counts": dict(sorted(statuses.items())),
-        "model_calls_total": sum(int(item.get("model_calls", 0)) for item in episodes),
-        "tool_calls_total": sum(int(item.get("tool_calls", 0)) for item in episodes),
-        "children_total": sum(int(item.get("children", 0)) for item in episodes),
+        "total_steps": sum(int(item.get("total_steps", 0)) for item in episodes),
+        "tool_calls_observed": sum(
+            int(item.get("tool_calls_observed", 0)) for item in episodes
+        ),
+        "children_spawned": sum(
+            int(item.get("children_spawned", 0)) for item in episodes
+        ),
     }
 
 
@@ -202,7 +234,7 @@ def _build_report(
     complete: bool,
 ) -> dict[str, Any]:
     return {
-        "protocol": "strict_recursive_tool_call_v1",
+        "protocol": "simplified_recursive_agent_v1",
         "benchmark": "ReCode WebShop",
         "split": split,
         "model": model_info,
@@ -211,7 +243,10 @@ def _build_report(
         "complete": complete,
         "started_at": started.isoformat(),
         "finished_at": datetime.now(timezone.utc).isoformat(),
-        "limits_per_episode": limits.__dict__,
+        "limits_per_episode": {
+            "max_total_steps": limits.max_total_steps,
+            "max_depth": limits.max_depth,
+        },
         "summary": summarize(episodes, requested=requested),
         "episodes": list(episodes),
     }
@@ -243,7 +278,10 @@ def _write_report(
         complete=complete,
     )
     temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(json.dumps(report, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
+    temporary.write_text(
+        json.dumps(report, indent=2, ensure_ascii=False, default=str),
+        encoding="utf-8",
+    )
     temporary.replace(path)
 
 
@@ -255,6 +293,7 @@ def _model_info(model: ToolCallingModel) -> dict[str, Any]:
         "max_tokens",
         "timeout",
         "native_tools",
+        "tool_choice",
         "chat_template_kwargs",
     )
     return {
@@ -264,37 +303,35 @@ def _model_info(model: ToolCallingModel) -> dict[str, Any]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Evaluate the strict recursive harness on ReCode WebShop.")
+    parser = argparse.ArgumentParser(
+        description="Evaluate the simplified recursive harness on ReCode WebShop."
+    )
     parser.add_argument("--project-root", default="/data2/zhangwenjian/agent/ReCode")
     parser.add_argument("--config", required=True)
     parser.add_argument("--split", default="test")
     parser.add_argument("--start-id", type=int, default=0)
-    parser.add_argument("--num-instances", type=int, default=200)
+    parser.add_argument("--num-instances", type=int, default=5)
     parser.add_argument("--ids", default="")
-    parser.add_argument("--episode-concurrency", type=int, default=4)
-    parser.add_argument("--max-steps-per-agent", type=int, default=12)
-    parser.add_argument("--max-model-calls-total", type=int, default=32)
-    parser.add_argument("--max-tool-calls-total", type=int, default=32)
+    parser.add_argument("--episode-concurrency", type=int, default=2)
+    parser.add_argument("--environment-max-steps", type=int, default=30)
+    parser.add_argument("--max-total-steps", type=int, default=24)
     parser.add_argument("--max-depth", type=int, default=3)
-    parser.add_argument("--max-children-total", type=int, default=8)
-    parser.add_argument("--max-concurrency", type=int, default=4)
-    parser.add_argument("--output", default="outputs/curagent_webshop_200.json")
-    parser.add_argument("--trace-dir", default="outputs/curagent_webshop_200_traces")
+    parser.add_argument("--output", default="outputs/curagent_webshop_small.json")
+    parser.add_argument("--trace-dir", default="outputs/curagent_webshop_small_traces")
     args = parser.parse_args()
 
     model = OpenAICompatibleModel(**load_model_config(args.config))
     limits = AgentLimits(
-        max_steps_per_agent=args.max_steps_per_agent,
-        max_model_calls_total=args.max_model_calls_total,
-        max_tool_calls_total=args.max_tool_calls_total,
+        max_total_steps=args.max_total_steps,
         max_depth=args.max_depth,
-        max_children_total=args.max_children_total,
-        max_concurrency=args.max_concurrency,
     )
     task_ids = (
         [item.strip() for item in args.ids.split(",") if item.strip()]
         if args.ids
-        else [str(index) for index in range(args.start_id, args.start_id + args.num_instances)]
+        else [
+            str(index)
+            for index in range(args.start_id, args.start_id + args.num_instances)
+        ]
     )
     output = Path(args.output)
     report = asyncio.run(
@@ -305,13 +342,23 @@ def main() -> None:
             model=model,
             limits=limits,
             episode_concurrency=args.episode_concurrency,
+            environment_max_steps=args.environment_max_steps,
             trace_dir=Path(args.trace_dir) if args.trace_dir else None,
             progress_path=output,
         )
     )
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(report, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
-    print(json.dumps({"output": str(output), "summary": report["summary"]}, indent=2, ensure_ascii=False))
+    output.write_text(
+        json.dumps(report, indent=2, ensure_ascii=False, default=str),
+        encoding="utf-8",
+    )
+    print(
+        json.dumps(
+            {"output": str(output), "summary": report["summary"]},
+            indent=2,
+            ensure_ascii=False,
+        )
+    )
 
 
 if __name__ == "__main__":

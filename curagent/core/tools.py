@@ -54,10 +54,16 @@ def strict_parse_response(response: ModelResponse) -> ToolCall:
     if not isinstance(value, Mapping):
         raise StrictToolCallError("native tool call must be an object")
     if "function" in value:
-        allowed = {"id", "type", "function"}
+        allowed = {"id", "type", "function", "index"}
         extras = set(value) - allowed
         if extras:
             raise StrictToolCallError(f"unknown native tool call fields: {sorted(extras)}")
+        if "index" in value and (
+            not isinstance(value["index"], int)
+            or isinstance(value["index"], bool)
+            or value["index"] < 0
+        ):
+            raise StrictToolCallError("native tool call index must be a non-negative integer")
         function = value.get("function")
         if not isinstance(function, Mapping):
             raise StrictToolCallError("native tool call function must be an object")
@@ -176,10 +182,6 @@ def framework_tool_schemas(*, python_enabled: bool) -> list[ToolSchema]:
             "task": {"type": "string", "minLength": 1},
             "context": {},
             "expected_output": {"type": "string"},
-            "access": {
-                "type": "string",
-                "enum": ["readonly", "clone", "delegated"],
-            },
         },
         "required": ["task", "context"],
         "additionalProperties": False,
@@ -192,7 +194,7 @@ def framework_tool_schemas(*, python_enabled: bool) -> list[ToolSchema]:
         ),
         ToolSchema(
             name="spawn_agents",
-            description="Run all children concurrently where permitted and return results in input order.",
+            description="Run children sequentially in input order and return their results.",
             parameters={
                 "type": "object",
                 "properties": {"specs": {"type": "array", "items": spec, "minItems": 1}},

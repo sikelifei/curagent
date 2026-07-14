@@ -16,7 +16,7 @@ class ToolSchemaError(HarnessError):
 
 
 class BudgetExceeded(HarnessError):
-    """A task-tree shared budget has been exhausted."""
+    """The task tree has no shared step slots left."""
 
     def __init__(self, resource: str) -> None:
         self.resource = resource
@@ -28,8 +28,19 @@ class SchedulerError(HarnessError):
 
 
 class ModelServiceError(HarnessError):
-    """An upstream model request failed with explicit retry semantics."""
+    """An upstream model request failed before producing a model output."""
 
-    def __init__(self, message: str, *, retryable: bool) -> None:
-        self.retryable = retryable
+    def __init__(
+        self,
+        message: str,
+        *,
+        has_output: bool = False,
+        raw_response: object | None = None,
+        protocol: str = "json",
+        tool_calls: object = (),
+    ) -> None:
+        self.has_output = has_output
+        self.raw_response = raw_response
+        self.protocol = protocol
+        self.tool_calls = tool_calls
         super().__init__(message)

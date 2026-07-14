@@ -1,4 +1,4 @@
-"""Core runtime for the strict recursive agent harness."""
+"""Core runtime for the simplified recursive agent harness."""
 
 from curagent.core.agent import AgentNode
 from curagent.core.budget import SharedBudget

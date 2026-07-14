@@ -1,19 +1,11 @@
-"""Deterministic direct-tool WebShop environment for invariant tests."""
+"""Deterministic direct-tool WebShop environment for harness tests."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
 
-from curagent.core.types import (
-    AccessMode,
-    Effect,
-    EnvCapabilities,
-    ExecutionReceipt,
-    Observation,
-    ReceiptStatus,
-    ToolCall,
-)
+from curagent.core.types import ToolCall, ToolSchema
 from curagent.environments.base import Environment
 from curagent.tasks.webshop import WEBSHOP_ENVIRONMENT_TOOLS
 
@@ -33,82 +25,42 @@ class MockWebShopEnvironment(Environment):
         self.instruction = "Buy the blue 32 oz insulated stainless steel water bottle."
         self._state = _State()
         self._version = 0
-        self._receipts: dict[str, ExecutionReceipt] = {}
 
-    async def reset(self, instance: Any = None) -> Observation:
+    async def reset(self, instance: Any = None) -> dict[str, Any]:
         if isinstance(instance, Mapping) and isinstance(instance.get("instruction"), str):
             self.instruction = instance["instruction"]
         self._state = _State()
         self._version = 0
-        self._receipts.clear()
         return await self.observe()
 
-    async def observe(self) -> Observation:
-        return Observation(
-            text=self._render(),
-            version=self._version,
-            metadata={
+    async def observe(self) -> dict[str, Any]:
+        return {
+            "text": self._render(),
+            "version": self._version,
+            "metadata": {
                 "instruction": self.instruction,
                 "done": self._state.done,
-                "reward": self._state.reward,
                 "valid_targets": self._valid_targets(),
             },
-        )
+        }
 
-    def tools(self, access: AccessMode) -> Sequence[ToolSchema]:
-        if access not in {AccessMode.OWNER, AccessMode.DELEGATED, AccessMode.CLONE}:
-            return []
+    def tools(self) -> Sequence[ToolSchema]:
         return WEBSHOP_ENVIRONMENT_TOOLS
 
-    async def execute(self, tool_call: ToolCall, expected_version: int) -> ExecutionReceipt:
-        before = await self.observe()
-        if tool_call.call_id in self._receipts:
-            return self._reject(tool_call, before, "duplicate call_id", "duplicate_call")
-        if expected_version != self._version:
-            return self._reject(
-                tool_call,
-                before,
-                f"stale version: expected {expected_version}, current {self._version}",
-                "stale_version",
-            )
+    async def execute(self, tool_call: ToolCall) -> Any:
         if self._state.done:
-            return self._reject(tool_call, before, "episode is already done", "environment_done")
-
+            return "episode is already done"
         error = self._apply(tool_call)
         if error:
-            receipt = self._reject(tool_call, before, error, "invalid_action")
-        else:
-            self._version += 1
-            after = await self.observe()
-            receipt = ExecutionReceipt(
-                call_id=tool_call.call_id,
-                status=ReceiptStatus.SUCCESS,
-                effect=Effect.COMMITTED,
-                result={"tool": tool_call.name, "arguments": dict(tool_call.arguments)},
-                version_before=before.version,
-                version_after=after.version,
-                observation=after,
-            )
-        self._receipts[tool_call.call_id] = receipt
-        return receipt
-
-    async def reconcile(self, call_id: str) -> ExecutionReceipt | None:
-        return self._receipts.get(call_id)
+            return error
+        self._version += 1
+        return {"tool": tool_call.name, "arguments": dict(tool_call.arguments)}
 
     def is_done(self) -> bool:
         return self._state.done
 
     def reward(self) -> float:
         return self._state.reward
-
-    def capabilities(self) -> EnvCapabilities:
-        return EnvCapabilities(
-            mutable=True,
-            supports_clone=False,
-            supports_readonly=True,
-            single_writer=True,
-            supports_idempotency_key=True,
-        )
 
     def _apply(self, call: ToolCall) -> str | None:
         if call.name == "search":
@@ -120,7 +72,7 @@ class MockWebShopEnvironment(Environment):
         if call.name == "click":
             target = call.arguments["target"]
             if target not in self._valid_targets():
-                return f"invalid click target: {target}"
+                return f"invalid click target: {target}; valid targets: {self._valid_targets()}"
             if self._state.page == "results":
                 self._state.selected_item = target
                 self._state.selected_options.clear()
@@ -165,19 +117,4 @@ class MockWebShopEnvironment(Environment):
         return (
             f"Instruction: {self.instruction}\nProduct {self._state.selected_item}\n"
             "Options: [Blue] [32 oz]\nActions: buy or [< Prev]"
-        )
-
-    @staticmethod
-    def _reject(
-        call: ToolCall, observation: Observation, error: str, error_type: str
-    ) -> ExecutionReceipt:
-        return ExecutionReceipt(
-            call_id=call.call_id,
-            status=ReceiptStatus.REJECTED,
-            effect=Effect.NO_CHANGE,
-            error=error,
-            version_before=observation.version,
-            version_after=observation.version,
-            observation=observation,
-            metadata={"error_type": error_type},
         )

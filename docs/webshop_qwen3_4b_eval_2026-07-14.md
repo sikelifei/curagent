@@ -34,6 +34,19 @@ python -m curagent.harness.webshop_eval \
   --max-depth 3 --max-children-total 6 --max-concurrency 4 \
   --output outputs/curagent_webshop_qwen3_4b_200_20260714.json \
   --trace-dir outputs/curagent_webshop_qwen3_4b_200_20260714_traces
+
+
+
+python -m curagent.harness.webshop_eval \
+  --config configs/planner_api.example.yaml \
+  --split test --start-id 0 --num-instances 200 \
+  --episode-concurrency 8 \
+  --max-steps-per-agent 12 \
+  --max-model-calls-total 24 \
+  --max-tool-calls-total 24 \
+  --max-depth 3 --max-children-total 12 --max-concurrency 4 \
+  --output outputs/curagent_webshop_deepseekflash_200_20260714.json \
+  --trace-dir outputs/curagent_webshop_deepseekflash_200_20260714
 ```
 
 Model request settings were temperature `0`, maximum output `512` tokens,

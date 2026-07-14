@@ -1,4 +1,4 @@
-"""Strict recursive agent harness."""
+"""Simplified recursive agent harness."""
 
 from curagent.core.agent import AgentNode
 from curagent.core.budget import SharedBudget

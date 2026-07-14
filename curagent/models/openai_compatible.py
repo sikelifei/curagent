@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from curagent.core.errors import ModelServiceError
+from curagent.core.prompt import BASE_SYSTEM_PROMPT
 from curagent.core.types import ModelResponse, ToolSchema
 
 
@@ -25,7 +26,9 @@ class OpenAICompatibleModel:
         max_tokens: int = 2048,
         timeout: float = 120.0,
         native_tools: bool = True,
+        tool_choice: str | Mapping[str, Any] = "required",
         chat_template_kwargs: Mapping[str, Any] | None = None,
+        system_prompt: str = BASE_SYSTEM_PROMPT,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
@@ -34,34 +37,52 @@ class OpenAICompatibleModel:
         self.max_tokens = max_tokens
         self.timeout = timeout
         self.native_tools = native_tools
+        self.tool_choice = dict(tool_choice) if isinstance(tool_choice, Mapping) else str(tool_choice)
         self.chat_template_kwargs = dict(chat_template_kwargs or {})
+        self.system_prompt = system_prompt
 
     async def generate(self, prompt: str, tools: Sequence[ToolSchema]) -> ModelResponse:
         payload = self._build_payload(prompt, tools)
         response = await asyncio.to_thread(self._request, payload)
         choices = response.get("choices")
         if not isinstance(choices, list) or not choices:
-            raise RuntimeError("chat-completions response has no choices")
+            raise ModelServiceError(
+                "chat-completions response has no choices",
+                has_output=True,
+                raw_response=response,
+            )
         message = choices[0].get("message")
         if not isinstance(message, Mapping):
-            raise RuntimeError("chat-completions choice has no assistant message")
+            raise ModelServiceError(
+                "chat-completions choice has no assistant message",
+                has_output=True,
+                raw_response=response,
+            )
         if self.native_tools:
             tool_calls = message.get("tool_calls") or []
             if not isinstance(tool_calls, list):
-                raise RuntimeError("assistant tool_calls is not a list")
+                raise ModelServiceError(
+                    "assistant tool_calls is not a list",
+                    has_output=True,
+                    raw_response=dict(message),
+                    protocol="native",
+                )
             return ModelResponse(raw_response=dict(message), tool_calls=tuple(tool_calls), protocol="native")
         return ModelResponse(raw_response=message.get("content"), protocol="json")
 
     def _build_payload(self, prompt: str, tools: Sequence[ToolSchema]) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "model": self.model,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": [
+                {"role": "system", "content": self.system_prompt},
+                {"role": "user", "content": prompt},
+            ],
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
         }
         if self.native_tools:
             payload["tools"] = [tool.to_model_dict() for tool in tools]
-            payload["tool_choice"] = "required"
+            payload["tool_choice"] = self.tool_choice
             payload["parallel_tool_calls"] = False
         if self.chat_template_kwargs:
             payload["chat_template_kwargs"] = self.chat_template_kwargs
@@ -83,14 +104,15 @@ class OpenAICompatibleModel:
                 value = json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")[:2000]
-            retryable = exc.code in {408, 409, 425, 429} or exc.code >= 500
-            raise ModelServiceError(
-                f"model HTTP {exc.code}: {detail}", retryable=retryable
-            ) from exc
+            raise ModelServiceError(f"model HTTP {exc.code}: {detail}") from exc
         except urllib.error.URLError as exc:
-            raise ModelServiceError(f"model connection error: {exc}", retryable=True) from exc
+            raise ModelServiceError(f"model connection error: {exc}") from exc
         if not isinstance(value, Mapping):
-            raise RuntimeError("chat-completions response is not an object")
+            raise ModelServiceError(
+                "chat-completions response is not an object",
+                has_output=True,
+                raw_response=value,
+            )
         return value
 
 
@@ -125,6 +147,8 @@ def load_model_config(path: str | Path) -> dict[str, Any]:
         "max_tokens",
         "timeout",
         "native_tools",
+        "tool_choice",
         "chat_template_kwargs",
+        "system_prompt",
     }
     return {key: item for key, item in result.items() if key in allowed}
