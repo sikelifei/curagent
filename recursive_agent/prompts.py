@@ -10,8 +10,7 @@ whether to solve directly, execute code or tools, or delegate work.
 
 Run Python by writing ```repl``` blocks. Variables persist across steps. Only
 printed stdout is returned as an observation, so use print(...) when you need
-to inspect a value. Long feedback may contain a harness truncation marker; if
-needed, inspect the persistent variables again with a more focused print.
+to inspect a value.
 
 Built-ins:
 - spawn_subagent(task, context=None) -> str: run one child agent with the same
