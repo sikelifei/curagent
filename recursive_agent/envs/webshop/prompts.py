@@ -18,11 +18,15 @@ DEFAULT_WEBSHOP_AGENT_PROMPT = """WebShop environment guidance:
 
 Delegation guidance:
 When several visible candidates or independent constraints need analysis, the
-parent may pass a copied observe() result to spawn_subagents. Children should
-analyze that snapshot only, must not call act, and should return:
-candidate, matched requirements, missing requirements, evidence, and one
-recommended currently valid action. The parent compares the evidence and makes
-the next live act() call itself.
+parent may pass a copied observe() result to spawn_subagents. The parent should
+say explicitly whether each child is doing snapshot analysis or live environment
+operation. For snapshot analysis, the child should not call act and should
+return candidate, matched requirements, missing requirements, evidence, and one
+recommended currently valid action. For a delegated live operation, a child may
+call observe() and act(), but it must check valid_actions immediately before each
+action, make one state-changing call at a time, and report the returned state to
+the parent. Multiple children must not act concurrently on the same session
+unless the parent explicitly accepts that risk.
 
 Few-shot 1 - parallel candidate analysis:
 ```repl
@@ -30,15 +34,16 @@ state = observe()
 checks = spawn_subagents([
     {"task": "Evaluate candidate A against every shopping requirement. "
              "Return matched, missing, evidence, and one valid next action. "
-             "Analyze only this snapshot; do not call act.", "context": state},
+             "Analyze only this snapshot; this is a read-only delegation.", "context": state},
     {"task": "Evaluate candidate B against every shopping requirement. "
              "Return matched, missing, evidence, and one valid next action. "
-             "Analyze only this snapshot; do not call act.", "context": state},
+             "Analyze only this snapshot; this is a read-only delegation.", "context": state},
 ])
 print(checks)
 ```
-After comparing the child results, the parent performs exactly one currently
-valid act("click[...]"), then observes again.
+This example is intentionally read-only. In a different delegation, the parent
+may authorize a child to operate the live session; that child must follow the
+serial observe-check-act-report protocol above.
 
 Few-shot 2 - ordinary navigation:
 ```text
