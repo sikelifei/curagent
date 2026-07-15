@@ -7,6 +7,7 @@ from .trace_analysis import aggregate_trace_metrics, analyze_environment_trace
 
 # Import built-in plugins for registration. External plugins can call
 # register_environment without modifying this package.
+from . import oolong as oolong
 from . import webshop as webshop
 
 __all__ = [
@@ -20,5 +21,6 @@ __all__ = [
     "register_environment",
     "run_environment",
     "run_registered_environment",
+    "oolong",
     "webshop",
 ]

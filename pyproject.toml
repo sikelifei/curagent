@@ -15,7 +15,8 @@ dependencies = [
 [project.optional-dependencies]
 anthropic = ["anthropic>=0.40"]
 gemini = ["google-genai>=1.0"]
-all-providers = ["anthropic>=0.40", "google-genai>=1.0"]
+oolong = ["datasets>=2.19"]
+all-providers = ["anthropic>=0.40", "google-genai>=1.0", "datasets>=2.19"]
 
 [tool.setuptools.packages.find]
 include = ["recursive_agent*"]

@@ -201,3 +201,40 @@ run = run_environment(
 print(run.agent_result.answer)
 print(run.environment_report)
 ```
+
+### Oolong-real DnD
+
+Oolong-real is registered as the `oolong` environment. The adapter uses a local generated `qa_pairs/dnd/{split}.jsonl` under `/data2/zhangwenjian/agent/bench/oolong` when one exists; otherwise it loads the published `oolongbench/oolong-real` dataset with the `dnd` configuration. The checked-out benchmark directory currently contains the generation/scoring code and empty source statistics, so the published dataset is the normal path for evaluation.
+
+Install the optional dataset dependency once:
+
+```bash
+python -m pip install -e '.[oolong]'
+```
+
+Run one real API example with the existing DeepSeek config:
+
+```bash
+python -m examples.run_oolong \
+  --config configs/model_api.local.yaml \
+  --oolong-root /data2/zhangwenjian/agent/bench/oolong \
+  --split test \
+  --instance-id 0 \
+  --trace-json outputs/oolong_real_0_trace.json
+```
+
+Run a resumable sequential evaluation and write official-style scores:
+
+```bash
+python -m examples.run_oolong_batch \
+  --config configs/model_api.local.yaml \
+  --oolong-root /data2/zhangwenjian/agent/bench/oolong \
+  --split test \
+  --start-index 0 \
+  --count 10 \
+  --resume \
+  --trace-jsonl outputs/oolong_real_traces.jsonl \
+  --summary-json outputs/oolong_real_summary.json
+```
+
+The Oolong plugin keeps the root prompt and recursive agent unchanged. Its environment prompt describes the read-only long context, and the `submit_answer(...)` tool records the `\\boxed{...}` response, parser confidence, and DnD score in the environment report.
