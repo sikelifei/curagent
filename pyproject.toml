@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "curagent"
+version = "0.1.0"
+description = "A small, general recursive agent with a persistent Python REPL"
+requires-python = ">=3.10"
+dependencies = [
+    "openai>=1.0",
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+anthropic = ["anthropic>=0.40"]
+gemini = ["google-genai>=1.0"]
+all-providers = ["anthropic>=0.40", "google-genai>=1.0"]
+
+[tool.setuptools.packages.find]
+include = ["recursive_agent*"]

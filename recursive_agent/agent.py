@@ -1,0 +1,553 @@
+"""Unified recursive-agent lifecycle and child execution."""
+
+from __future__ import annotations
+
+import copy
+import threading
+import time
+import uuid
+from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import dataclass, field
+from typing import Any, Callable
+
+from . import clients
+from .clients.base import ModelClient
+from .config import AgentConfig, load_model_config
+from .exceptions import (
+    CancellationError,
+    ConfigurationError,
+    ModelCallError,
+    TimeoutExceededError,
+)
+from .prompts import FORCED_FINAL_USER, build_initial_user, build_system_prompt
+from .repl import ReplSession, find_repl_blocks
+from .tools import ToolInfo, format_tools_for_prompt, parse_tools, tool_values
+from .types import (
+    AgentResult,
+    AgentStep,
+    AgentTrace,
+    EnvironmentStatus,
+    ModelCallUsage,
+    ModelResponse,
+    ModelUsageSummary,
+    UsageSummary,
+)
+
+ClientFactory = Callable[[str, dict[str, Any]], ModelClient]
+TerminationCheck = Callable[[], EnvironmentStatus | dict[str, Any] | Any]
+
+
+class _UsageAccumulator:
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._models: dict[str, ModelUsageSummary] = {}
+
+    def add(self, usage: ModelCallUsage) -> None:
+        with self._lock:
+            current = self._models.setdefault(usage.model, ModelUsageSummary())
+            current.total_calls += 1
+            current.total_input_tokens += usage.input_tokens
+            current.total_output_tokens += usage.output_tokens
+            if usage.cost is not None:
+                current.total_cost = (current.total_cost or 0.0) + usage.cost
+
+    def snapshot(self) -> UsageSummary:
+        with self._lock:
+            return UsageSummary(
+                model_usage_summaries={
+                    name: ModelUsageSummary(
+                        total_calls=value.total_calls,
+                        total_input_tokens=value.total_input_tokens,
+                        total_output_tokens=value.total_output_tokens,
+                        total_cost=value.total_cost,
+                    )
+                    for name, value in self._models.items()
+                }
+            )
+
+
+@dataclass
+class _RunContext:
+    run_id: str
+    started_at: float
+    max_run_seconds: float | None
+    cancellation: threading.Event = field(default_factory=threading.Event)
+    usage: _UsageAccumulator = field(default_factory=_UsageAccumulator)
+    trace_lock: threading.Lock = field(default_factory=threading.Lock)
+
+    @property
+    def deadline(self) -> float | None:
+        if self.max_run_seconds is None:
+            return None
+        return self.started_at + self.max_run_seconds
+
+    def remaining_seconds(self) -> float | None:
+        deadline = self.deadline
+        if deadline is None:
+            return None
+        return max(0.0, deadline - time.monotonic())
+
+    def check(self) -> None:
+        if self.cancellation.is_set():
+            raise CancellationError("Run was cancelled")
+        if self.deadline is not None and time.monotonic() >= self.deadline:
+            raise TimeoutExceededError(
+                elapsed=time.monotonic() - self.started_at,
+                timeout=self.max_run_seconds or 0.0,
+            )
+
+
+class RecursiveAgent:
+    """A general agent whose parent and children run the same REPL loop."""
+
+    def __init__(
+        self,
+        backend: str = "openai",
+        backend_kwargs: dict[str, Any] | None = None,
+        tools: dict[str, Any] | None = None,
+        max_steps: int = 20,
+        max_depth: int = 4,
+        max_concurrent_subagents: int = 4,
+        max_run_seconds: float | None = None,
+        termination_check: TerminationCheck | None = None,
+        client_factory: ClientFactory | None = None,
+    ) -> None:
+        self.config = AgentConfig(
+            backend=backend,
+            backend_kwargs=dict(backend_kwargs or {}),
+            max_steps=max_steps,
+            max_depth=max_depth,
+            max_concurrent_subagents=max_concurrent_subagents,
+            max_run_seconds=max_run_seconds,
+        )
+        self._tools: dict[str, ToolInfo] = parse_tools(tools)
+        self._tool_values = tool_values(self._tools)
+        self._system_prompt = build_system_prompt(format_tools_for_prompt(self._tools))
+        self._termination_check = termination_check
+        self._client_factory = client_factory or clients.get_client
+        self._active_lock = threading.Lock()
+        self._active_runs: dict[str, _RunContext] = {}
+
+    @classmethod
+    def from_config(cls, path: str, **kwargs: Any) -> "RecursiveAgent":
+        backend, backend_kwargs = load_model_config(path)
+        return cls(backend=backend, backend_kwargs=backend_kwargs, **kwargs)
+
+    @property
+    def system_prompt(self) -> str:
+        """Return the exact system prompt sent to this agent and its children."""
+        return self._system_prompt
+
+    def cancel(self) -> None:
+        """Cooperatively cancel all runs currently active on this instance."""
+        with self._active_lock:
+            contexts = list(self._active_runs.values())
+        for context in contexts:
+            context.cancellation.set()
+
+    def run(self, task: str, context: Any | None = None) -> AgentResult:
+        self._validate_task(task)
+        try:
+            private_context = copy.deepcopy(context)
+        except Exception as exc:
+            raise ConfigurationError("Root context must support copy.deepcopy") from exc
+
+        run_context = _RunContext(
+            run_id=uuid.uuid4().hex,
+            started_at=time.monotonic(),
+            max_run_seconds=self.config.max_run_seconds,
+        )
+        with self._active_lock:
+            self._active_runs[run_context.run_id] = run_context
+        try:
+            return self._run_agent(
+                task=task,
+                context=private_context,
+                depth=0,
+                parent_trace=None,
+                run_context=run_context,
+            )
+        except KeyboardInterrupt:
+            run_context.cancellation.set()
+            raise CancellationError("Run interrupted by user") from None
+        finally:
+            with self._active_lock:
+                self._active_runs.pop(run_context.run_id, None)
+
+    def _run_agent(
+        self,
+        *,
+        task: str,
+        context: Any,
+        depth: int,
+        parent_trace: AgentTrace | None,
+        run_context: _RunContext,
+    ) -> AgentResult:
+        run_context.check()
+        trace = AgentTrace(
+            agent_id=uuid.uuid4().hex,
+            parent_id=parent_trace.agent_id if parent_trace else None,
+            depth=depth,
+            task=task,
+        )
+        if parent_trace is not None:
+            with run_context.trace_lock:
+                parent_trace.children.append(trace)
+
+        started = time.perf_counter()
+        client = self._make_client()
+        messages: list[dict[str, str]] = [
+            {"role": "system", "content": self._system_prompt},
+            {"role": "user", "content": build_initial_user(task)},
+        ]
+        latest_response: str | None = None
+        local_usage = _UsageAccumulator()
+
+        def spawn_one(child_task: str, child_context: Any | None = None) -> str:
+            return self._spawn_child(
+                task=child_task,
+                context=child_context,
+                depth=depth,
+                parent_trace=trace,
+                run_context=run_context,
+            )
+
+        def spawn_many(requests: list[dict[str, Any]]) -> list[str]:
+            return self._spawn_children(
+                requests=requests,
+                depth=depth,
+                parent_trace=trace,
+                run_context=run_context,
+            )
+
+        repl = ReplSession(
+            context=context,
+            tools=self._tool_values,
+            spawn_subagent=spawn_one,
+            spawn_subagents=spawn_many,
+        )
+
+        try:
+            for step_number in range(1, self.config.max_steps + 1):
+                step_started = time.perf_counter()
+                response = self._call_model(
+                    client,
+                    messages,
+                    run_context,
+                    latest_response,
+                    local_usage,
+                )
+                latest_response = response
+                messages.append({"role": "assistant", "content": response})
+                step_trace = AgentStep(number=step_number, response=response)
+                trace.steps.append(step_trace)
+
+                code_blocks = find_repl_blocks(response)
+                if not code_blocks:
+                    messages.append({"role": "user", "content": "Continue."})
+                    step_trace.duration_seconds = time.perf_counter() - step_started
+                    continue
+
+                observations: list[str] = []
+                for code in code_blocks:
+                    execution = repl.execute(code)
+                    step_trace.code_executions.append(execution.trace)
+                    observations.append(execution.trace.output or "(no output)")
+                    run_context.check()
+
+                    if execution.answer_ready:
+                        step_trace.duration_seconds = time.perf_counter() - step_started
+                        return self._finish(
+                            answer=execution.answer_content or "",
+                            status="completed",
+                            steps=step_number,
+                            trace=trace,
+                            started=started,
+                            run_context=run_context,
+                            local_usage=local_usage,
+                        )
+
+                    environment = self._environment_status()
+                    run_context.check()
+                    if environment.done:
+                        step_trace.duration_seconds = time.perf_counter() - step_started
+                        if environment.final_answer is not None:
+                            return self._finish(
+                                answer=str(environment.final_answer),
+                                status="environment_done",
+                                steps=step_number,
+                                trace=trace,
+                                started=started,
+                                run_context=run_context,
+                                local_usage=local_usage,
+                            )
+                        messages.append(
+                            {"role": "user", "content": _format_observations(observations)}
+                        )
+                        return self._forced_final(
+                            client=client,
+                            messages=messages,
+                            steps=step_number,
+                            trace=trace,
+                            started=started,
+                            run_context=run_context,
+                            latest_response=latest_response,
+                            local_usage=local_usage,
+                        )
+
+                messages.append({"role": "user", "content": _format_observations(observations)})
+                step_trace.duration_seconds = time.perf_counter() - step_started
+
+            return self._forced_final(
+                client=client,
+                messages=messages,
+                steps=self.config.max_steps,
+                trace=trace,
+                started=started,
+                run_context=run_context,
+                latest_response=latest_response,
+                local_usage=local_usage,
+            )
+        except BaseException as exc:
+            trace.error = f"{type(exc).__name__}: {exc}"
+            trace.duration_seconds = time.perf_counter() - started
+            raise
+        finally:
+            close = getattr(client, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:
+                    pass
+
+    def _forced_final(
+        self,
+        *,
+        client: ModelClient,
+        messages: list[dict[str, str]],
+        steps: int,
+        trace: AgentTrace,
+        started: float,
+        run_context: _RunContext,
+        latest_response: str | None,
+        local_usage: _UsageAccumulator,
+    ) -> AgentResult:
+        messages.append({"role": "user", "content": FORCED_FINAL_USER})
+        answer = self._call_model(
+            client,
+            messages,
+            run_context,
+            latest_response,
+            local_usage,
+        )
+        trace.forced_final_response = answer
+        return self._finish(
+            answer=answer,
+            status="forced_final",
+            steps=steps,
+            trace=trace,
+            started=started,
+            run_context=run_context,
+            local_usage=local_usage,
+        )
+
+    def _call_model(
+        self,
+        client: ModelClient,
+        messages: list[dict[str, str]],
+        run_context: _RunContext,
+        latest_response: str | None,
+        local_usage: _UsageAccumulator,
+    ) -> str:
+        run_context.check()
+        try:
+            raw_response = client.completion(
+                messages,
+                timeout=run_context.remaining_seconds(),
+            )
+        except (CancellationError, TimeoutExceededError, ModelCallError):
+            raise
+        except Exception as exc:
+            run_context.check()
+            raise ModelCallError(
+                f"Model call failed: {type(exc).__name__}: {exc}",
+                last_response=latest_response,
+            ) from exc
+        run_context.check()
+
+        if isinstance(raw_response, ModelResponse):
+            response = raw_response
+        elif isinstance(raw_response, str):
+            response = ModelResponse(
+                content=raw_response,
+                usage=ModelCallUsage(model=getattr(client, "model_name", "unknown")),
+            )
+        else:
+            raise ModelCallError(
+                f"Model client returned unsupported response type: {type(raw_response).__name__}",
+                last_response=latest_response,
+            )
+        run_context.usage.add(response.usage)
+        local_usage.add(response.usage)
+        return response.content
+
+    def _spawn_child(
+        self,
+        *,
+        task: str,
+        context: Any,
+        depth: int,
+        parent_trace: AgentTrace,
+        run_context: _RunContext,
+    ) -> str:
+        self._validate_task(task)
+        if depth >= self.config.max_depth:
+            return f"Error: maximum recursion depth ({self.config.max_depth}) reached"
+        try:
+            child_context = copy.deepcopy(context)
+        except Exception:
+            return "Error: subagent context could not be copied"
+
+        try:
+            run_context.check()
+            result = self._run_agent(
+                task=task,
+                context=child_context,
+                depth=depth + 1,
+                parent_trace=parent_trace,
+                run_context=run_context,
+            )
+            return result.answer
+        except TimeoutExceededError:
+            return "Error: subagent timed out"
+        except CancellationError:
+            return "Error: subagent cancelled"
+        except ModelCallError:
+            return "Error: subagent model call failed"
+        except Exception:
+            return "Error: subagent failed"
+
+    def _spawn_children(
+        self,
+        *,
+        requests: list[dict[str, Any]],
+        depth: int,
+        parent_trace: AgentTrace,
+        run_context: _RunContext,
+    ) -> list[str]:
+        normalized = self._validate_requests(requests)
+        if not normalized:
+            return []
+        if depth >= self.config.max_depth:
+            error = f"Error: maximum recursion depth ({self.config.max_depth}) reached"
+            return [error for _ in normalized]
+
+        executor = ThreadPoolExecutor(
+            max_workers=min(self.config.max_concurrent_subagents, len(normalized)),
+            thread_name_prefix="recursive-agent",
+        )
+        futures: list[Future[str]] = []
+        try:
+            for request in normalized:
+                run_context.check()
+                futures.append(
+                    executor.submit(
+                        self._spawn_child,
+                        task=request["task"],
+                        context=request.get("context"),
+                        depth=depth,
+                        parent_trace=parent_trace,
+                        run_context=run_context,
+                    )
+                )
+            results = [future.result() for future in futures]
+            run_context.check()
+            return results
+        finally:
+            if run_context.cancellation.is_set() or (
+                run_context.deadline is not None and time.monotonic() >= run_context.deadline
+            ):
+                for future in futures:
+                    future.cancel()
+            executor.shutdown(wait=True, cancel_futures=True)
+
+    def _environment_status(self) -> EnvironmentStatus:
+        if self._termination_check is None:
+            return EnvironmentStatus(done=False)
+        raw = self._termination_check()
+        if raw is None:
+            return EnvironmentStatus(done=False)
+        if isinstance(raw, EnvironmentStatus):
+            return raw
+        if isinstance(raw, dict):
+            return EnvironmentStatus(
+                done=bool(raw.get("done", False)),
+                final_answer=raw.get("final_answer"),
+                reason=raw.get("reason"),
+            )
+        if hasattr(raw, "done"):
+            return EnvironmentStatus(
+                done=bool(raw.done),
+                final_answer=getattr(raw, "final_answer", None),
+                reason=getattr(raw, "reason", None),
+            )
+        raise ConfigurationError(
+            "termination_check must return EnvironmentStatus, a mapping, an object with done, or None"
+        )
+
+    def _finish(
+        self,
+        *,
+        answer: str,
+        status: str,
+        steps: int,
+        trace: AgentTrace,
+        started: float,
+        run_context: _RunContext,
+        local_usage: _UsageAccumulator,
+    ) -> AgentResult:
+        trace.status = status  # type: ignore[assignment]
+        trace.answer = answer
+        trace.usage = local_usage.snapshot()
+        trace.duration_seconds = time.perf_counter() - started
+        return AgentResult(
+            answer=answer,
+            status=status,  # type: ignore[arg-type]
+            steps=steps,
+            usage=run_context.usage.snapshot(),
+            trace=trace,
+        )
+
+    def _make_client(self) -> ModelClient:
+        return self._client_factory(self.config.backend, dict(self.config.backend_kwargs))
+
+    @staticmethod
+    def _validate_task(task: Any) -> None:
+        if not isinstance(task, str) or not task.strip():
+            raise ValueError("task must be a non-empty string")
+
+    @classmethod
+    def _validate_requests(cls, requests: Any) -> list[dict[str, Any]]:
+        if not isinstance(requests, list):
+            raise TypeError("spawn_subagents requests must be a list")
+        normalized = []
+        for index, request in enumerate(requests):
+            if not isinstance(request, dict):
+                raise TypeError(f"spawn_subagents request {index} must be a dict")
+            unknown = set(request) - {"task", "context"}
+            if unknown:
+                raise ValueError(
+                    f"spawn_subagents request {index} has unsupported keys: {sorted(unknown)}"
+                )
+            try:
+                cls._validate_task(request.get("task"))
+            except ValueError as exc:
+                raise ValueError(
+                    f"spawn_subagents request {index} must have a non-empty task"
+                ) from exc
+            normalized.append(request)
+        return normalized
+
+
+def _format_observations(observations: list[str]) -> str:
+    return "REPL output:\n" + "\n\n".join(observations or ["(no output)"])
