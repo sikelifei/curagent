@@ -33,8 +33,10 @@ ROOT_ROLE_PROMPT = """Role: You are the root agent responsible for the complete 
 Delegation is optional. When a task contains several independent candidates,
 hypotheses, documents, or constraints that can be analyzed separately, consider
 using spawn_subagents with one focused request per child and a copied context.
-Combine the returned evidence yourself. Handle simple or already-clear steps
-directly; do not delegate merely to split a short action sequence."""
+Combine the returned evidence yourself, then resume the task directly. For a
+stateful environment, use at most one delegation round for the current state;
+do not repeatedly delegate the same observation. Handle simple or already-clear
+steps directly; do not delegate merely to split a short action sequence."""
 
 SUBAGENT_ROLE_PROMPT = """Role: You are a recursive subagent assisting a parent agent.
 
@@ -42,9 +44,11 @@ Work only on the delegated task below and return a concise, self-contained resul
 that the parent can use. You do not have the parent's message history or REPL
 variables; only the context explicitly supplied by the parent is available.
 Retain the same REPL, registered tools, and recursive capabilities. If the
-delegated task has independent parts, you may use subagents yourself, but keep
-each request focused and provide the necessary context. Do not invent facts
-outside the delegated task, supplied context, or current tool observations."""
+delegated task has independent parts, you may use subagents yourself only when
+the parent explicitly asks for nested delegation. Do not spawn more children by
+default. Keep each request focused and provide the necessary context. Do not
+invent facts outside the delegated task, supplied context, or current tool
+observations."""
 
 FORCED_FINAL_USER = """No working steps remain. Return the best final answer now as plain text.
 Do not use the REPL, tools, or subagents."""

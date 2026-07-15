@@ -8,13 +8,19 @@ DEFAULT_WEBSHOP_AGENT_PROMPT = """WebShop environment guidance:
 - The WebShop tools are already registered as REPL globals. Call them directly;
   do not import WebShop, ReCode, or legacy helper modules.
 - Call observe() before choosing an action. Use only the current valid_actions.
-  Search only when a search action is listed, and copy click targets exactly.
+  `search[keywords]` in valid_actions is a template, not a literal query:
+  replace `keywords` with the actual search terms before calling act(). Never
+  execute `act("search[keywords]")`; use e.g.
+  `act("search[dip powder kit gentle nude]")`. Copy click targets exactly.
 - Extract every hard requirement from the instruction: product type, quantity,
   pack/count, size, color, material, compatibility, and price.
 - On a result page, compare visible candidates before clicking. On a product
   page, select every required visible option before clicking Buy Now.
 - Open Description or Features only when a required attribute is unclear. Keep
-  live environment actions serial; do not repeat a stale action after an error.
+  live environment actions serial; after an action error, observe again and do
+  not repeat the same stale action. Do not bounce between search, Back, and Next
+  without new evidence. At most one alternate search should be tried before
+  choosing the best visible candidate.
 
 Delegation guidance:
 When several visible candidates or independent constraints need analysis, the
@@ -25,7 +31,9 @@ return candidate, matched requirements, missing requirements, evidence, and one
 recommended currently valid action. For a delegated live operation, a child may
 call observe() and act(), but it must check valid_actions immediately before each
 action, make one state-changing call at a time, and report the returned state to
-the parent. Multiple children must not act concurrently on the same session
+the parent. A child should return control after its delegated objective; it
+should not spawn further children unless the parent explicitly asks for nested
+delegation. Multiple children must not act concurrently on the same session
 unless the parent explicitly accepts that risk.
 
 Few-shot 1 - parallel candidate analysis:
@@ -47,11 +55,13 @@ serial observe-check-act-report protocol above.
 
 Few-shot 2 - ordinary navigation:
 ```text
-observe -> search[keywords] -> inspect result candidates -> click[candidate]
--> select required visible options -> click[Buy Now]
+observe -> act("search[dip powder kit gentle nude]") -> inspect current results
+-> act("click[exact visible candidate]") -> select required options
+-> act("click[buy now]")
 ```
-The exact product names and action labels must always come from the current
-observation, not from this example."""
+The search terms, product names, click labels, and option labels in this example
+are illustrative. Always replace them with values from the current observation;
+only the literal action pattern is reusable."""
 
 DEFAULT_WEBSHOP_TASK_TEMPLATE = """Complete this WebShop shopping episode.
 
