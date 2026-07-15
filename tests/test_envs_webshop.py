@@ -212,6 +212,8 @@ class WebShopEnvironmentTests(unittest.TestCase):
         self.assertIn("find a red test product", factory.calls[0][1]["content"])
         self.assertIn("observe", factory.calls[0][0]["content"])
         self.assertIn("act", factory.calls[0][0]["content"])
+        self.assertIn("WebShop environment guidance", factory.calls[0][0]["content"])
+        self.assertIn("do not import WebShop", factory.calls[0][0]["content"])
         exported = run.to_trace_dict()
         serialized = json.dumps(exported)
         self.assertNotIn("super-secret-api-key", serialized)

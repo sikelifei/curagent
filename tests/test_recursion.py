@@ -50,8 +50,10 @@ class RecursionTests(unittest.TestCase):
         self.assertEqual(len(result.trace.children), 1)
         self.assertEqual(result.trace.children[0].task, "child")
         self.assertEqual(result.trace.children[0].status, "completed")
-        system_prompts = {call[0]["content"] for call in factory.calls}
-        self.assertEqual(len(system_prompts), 1)
+        system_prompts = [call[0]["content"] for call in factory.calls]
+        self.assertIn("Role: You are the root agent", system_prompts[0])
+        self.assertIn("Role: You are a recursive subagent", system_prompts[1])
+        self.assertNotEqual(system_prompts[0], system_prompts[1])
 
     def test_nested_child_has_same_spawn_capability(self) -> None:
         def handler(messages, timeout):

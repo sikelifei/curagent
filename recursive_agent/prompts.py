@@ -1,4 +1,4 @@
-"""Prompt text for every agent in the recursive tree."""
+"""Prompt text for root agents and delegated subagents."""
 
 from __future__ import annotations
 
@@ -24,17 +24,47 @@ Built-ins:
 - answer: set answer["content"] and then answer["ready"] = True when finished.
 
 Each child sees only the task and a private copy of the context you pass, not
-your history or local variables. Custom tools are the same registered objects
-for every agent and may access shared external state. Give each child all
-information needed for its task.{custom_tools}"""
+the parent's history or local variables. Custom tools are the same registered
+objects for every agent and may access shared external state. Give each child
+all information needed for the task."""
+
+ROOT_ROLE_PROMPT = """Role: You are the root agent responsible for the complete task.
+
+Delegation is optional. When a task contains several independent candidates,
+hypotheses, documents, or constraints that can be analyzed separately, consider
+using spawn_subagents with one focused request per child and a copied context.
+Combine the returned evidence yourself. Handle simple or already-clear steps
+directly; do not delegate merely to split a short action sequence."""
+
+SUBAGENT_ROLE_PROMPT = """Role: You are a recursive subagent assisting a parent agent.
+
+Work only on the delegated task below and return a concise, self-contained result
+that the parent can use. You do not have the parent's message history or REPL
+variables; only the context explicitly supplied by the parent is available.
+Retain the same REPL, registered tools, and recursive capabilities. If the
+delegated task has independent parts, you may use subagents yourself, but keep
+each request focused and provide the necessary context. Do not invent facts
+outside the delegated task, supplied context, or current tool observations."""
 
 FORCED_FINAL_USER = """No working steps remain. Return the best final answer now as plain text.
 Do not use the REPL, tools, or subagents."""
 
 
-def build_system_prompt(formatted_tools: str | None) -> str:
-    suffix = f"\n\nCustom tools:\n{formatted_tools}" if formatted_tools else ""
-    return SYSTEM_PROMPT.format(custom_tools=suffix)
+def build_system_prompt(
+    formatted_tools: str | None,
+    *,
+    role: str = "root",
+    prompt_addendum: str | None = None,
+) -> str:
+    if role not in {"root", "subagent"}:
+        raise ValueError("role must be 'root' or 'subagent'")
+    role_prompt = ROOT_ROLE_PROMPT if role == "root" else SUBAGENT_ROLE_PROMPT
+    sections = [SYSTEM_PROMPT, role_prompt]
+    if prompt_addendum:
+        sections.append(str(prompt_addendum).strip())
+    if formatted_tools:
+        sections.append(f"Custom tools:\n{formatted_tools}")
+    return "\n\n".join(section for section in sections if section)
 
 
 def build_initial_user(task: str) -> str:
@@ -42,4 +72,3 @@ def build_initial_user(task: str) -> str:
         f"Task:\n{task}\n\n"
         "Additional context is available in the REPL variable `context`."
     )
-

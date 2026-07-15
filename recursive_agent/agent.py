@@ -110,6 +110,7 @@ class RecursiveAgent:
         max_concurrent_subagents: int = 4,
         max_run_seconds: float | None = None,
         termination_check: TerminationCheck | None = None,
+        prompt_addendum: str | None = None,
         client_factory: ClientFactory | None = None,
     ) -> None:
         self.config = AgentConfig(
@@ -122,7 +123,13 @@ class RecursiveAgent:
         )
         self._tools: dict[str, ToolInfo] = parse_tools(tools)
         self._tool_values = tool_values(self._tools)
-        self._system_prompt = build_system_prompt(format_tools_for_prompt(self._tools))
+        self._formatted_tools = format_tools_for_prompt(self._tools)
+        self._prompt_addendum = str(prompt_addendum).strip() if prompt_addendum else None
+        self._system_prompt = build_system_prompt(
+            self._formatted_tools,
+            role="root",
+            prompt_addendum=self._prompt_addendum,
+        )
         self._termination_check = termination_check
         self._client_factory = client_factory or clients.get_client
         self._active_lock = threading.Lock()
@@ -196,8 +203,15 @@ class RecursiveAgent:
 
         started = time.perf_counter()
         client = self._make_client()
+        role = "subagent" if parent_trace is not None else "root"
+        system_prompt = build_system_prompt(
+            self._formatted_tools,
+            role=role,
+            prompt_addendum=self._prompt_addendum,
+        )
+        trace.system_prompt = system_prompt
         messages: list[dict[str, str]] = [
-            {"role": "system", "content": self._system_prompt},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": build_initial_user(task)},
         ]
         latest_response: str | None = None

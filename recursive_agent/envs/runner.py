@@ -50,7 +50,7 @@ def run_environment(
 ) -> EnvironmentRunResult:
     """Run and close one initialized environment episode."""
     kwargs = dict(agent_kwargs or {})
-    conflicts = {"tools", "termination_check"} & set(kwargs)
+    conflicts = {"tools", "termination_check", "prompt_addendum"} & set(kwargs)
     if conflicts:
         raise ValueError(
             f"Environment runner owns these agent arguments: {sorted(conflicts)}"
@@ -63,6 +63,7 @@ def run_environment(
             str(model_config),
             tools=tools,
             termination_check=environment.status,
+            prompt_addendum=environment.agent_prompt,
             **kwargs,
         )
         result = agent.run(task=task_prompt, context=initial_context)
@@ -118,6 +119,7 @@ def _agent_trace_to_dict(trace: Any) -> dict[str, Any] | None:
         "parent_id": trace.parent_id,
         "depth": trace.depth,
         "task": trace.task,
+        "system_prompt": trace.system_prompt,
         "steps": [
             {
                 "number": step.number,

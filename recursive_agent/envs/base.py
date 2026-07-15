@@ -27,6 +27,11 @@ class AgentEnvironment(ABC):
     def tools(self) -> dict[str, Any]:
         """Return custom tools to register on the agent."""
 
+    @property
+    def agent_prompt(self) -> str:
+        """Return environment guidance shared by root and delegated agents."""
+        return ""
+
     @abstractmethod
     def status(self) -> EnvironmentStatus:
         """Return the current environment termination state."""
@@ -48,4 +53,3 @@ class AgentEnvironment(ABC):
 
 class EnvironmentDependencyError(RuntimeError):
     """Raised when an external environment or its dependencies are unavailable."""
-

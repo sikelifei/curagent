@@ -110,6 +110,7 @@ class AgentTrace:
     parent_id: str | None
     depth: int
     task: str
+    system_prompt: str = ""
     steps: list[AgentStep] = field(default_factory=list)
     children: list["AgentTrace"] = field(default_factory=list)
     forced_final_response: str | None = None
