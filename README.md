@@ -34,6 +34,7 @@ agent = RecursiveAgent(
     max_depth=4,
     max_concurrent_subagents=4,
     max_run_seconds=300,
+    max_observation_chars=8000,
 )
 
 result = agent.run(
@@ -57,6 +58,31 @@ answer["ready"] = True
 ```
 
 `spawn_subagents` 总是并发执行合法请求并按输入顺序返回。共享有状态环境是否适合并发由模型判断，runtime 不加环境锁、不 clone 环境，也不自动降级为串行。
+
+## Observation 截断
+
+REPL、tool 和环境返回值只有在模型执行 `print(...)` 后才进入下一轮消息。为防止
+一次超长 stdout 或异常内容占满后续 context，harness 默认将每轮发给模型的
+`REPL output` 限制为 8,000 字符：
+
+- 短输出保持原样。
+- 长输出保留首尾，并加入 `truncated by harness` 标记、原始字符数和上限。
+- 本轮 execution error 会优先保留在 `Preserved execution errors` 段。
+- `AgentTrace` 中的 `code_executions[].output/error` 仍保存完整原始值；
+  `model_observation` 保存模型实际看到的截断版本，`observation_truncated` 记录
+  本轮是否截断。
+
+可通过 `max_observation_chars` 修改上限，或设置为 `None` 关闭：
+
+```python
+agent = RecursiveAgent(
+    ...,
+    max_observation_chars=12000,
+)
+```
+
+这是字符边界，不声称等于某个模型的精确 token 数；不同 provider/model 的
+tokenizer 不同。
 
 ## YAML 配置
 
@@ -103,7 +129,7 @@ def status():
 python -m unittest discover -v
 ```
 
-测试覆盖 prompt/history、持久 REPL、tool 恢复、递归隔离、nested child、depth limit、保序并发、局部 child 失败、终止顺序、forced final、usage、timeout 和 cancel。
+测试覆盖 prompt/history、持久 REPL、tool 恢复、递归隔离、nested child、depth limit、保序并发、局部 child 失败、observation 截断与原始 trace 保留、终止顺序、forced final、usage、timeout 和 cancel。
 
 ## 环境插件
 
@@ -135,7 +161,8 @@ python -m examples.run_webshop \
   --config configs/model_api.local.yaml \
   --recode-root /data2/zhangwenjian/agent/ReCode \
   --split test \
-  --instance-id 0
+  --instance-id 0 \
+  --max-observation-chars 8000
 ```
 
 也可以设置 `RECODE_ROOT`，省略 `--recode-root`。适配层注册以下 tools：

@@ -51,9 +51,61 @@ class RecursionTests(unittest.TestCase):
         self.assertEqual(result.trace.children[0].task, "child")
         self.assertEqual(result.trace.children[0].status, "completed")
         system_prompts = [call[0]["content"] for call in factory.calls]
-        self.assertIn("Role: You are the root agent", system_prompts[0])
-        self.assertIn("Role: You are a recursive subagent", system_prompts[1])
-        self.assertNotEqual(system_prompts[0], system_prompts[1])
+        self.assertEqual(system_prompts[0], system_prompts[1])
+        self.assertIn("Every agent has the same capabilities", system_prompts[0])
+        self.assertTrue(factory.calls[0][1]["content"].startswith("Task:\nroot"))
+        self.assertTrue(
+            factory.calls[1][1]["content"].startswith("Delegated task:\nchild")
+        )
+        for messages in factory.calls:
+            self.assertEqual(
+                sum(message["role"] == "system" for message in messages),
+                1,
+            )
+
+    def test_child_keeps_only_its_own_message_history(self) -> None:
+        def handler(messages, timeout):
+            task = initial_task(messages)
+            if task == "root-history-task":
+                if len(messages) == 2:
+                    return (
+                        "```repl\n"
+                        "child_result = spawn_subagent('child-history-task', {'value': 7})\n"
+                        "print(child_result)\n```"
+                    )
+                return (
+                    '```repl\nanswer["content"] = child_result\n'
+                    'answer["ready"] = True\n```'
+                )
+            if len(messages) == 2:
+                return "```repl\nprint(context['value'])\n```"
+            return (
+                '```repl\nanswer["content"] = "child-done"\n'
+                'answer["ready"] = True\n```'
+            )
+
+        factory = FakeFactory(handler)
+        result = RecursiveAgent(
+            backend_kwargs={"model_name": "fake"},
+            max_depth=1,
+            client_factory=factory,
+        ).run("root-history-task")
+
+        self.assertEqual(result.answer, "child-done")
+        child_second_call = factory.calls[2]
+        self.assertEqual(len(child_second_call), 4)
+        self.assertEqual(child_second_call[0]["role"], "system")
+        self.assertTrue(
+            child_second_call[1]["content"].startswith(
+                "Delegated task:\nchild-history-task"
+            )
+        )
+        self.assertNotIn("root-history-task", str(child_second_call))
+        self.assertIn("REPL output:\n7", child_second_call[-1]["content"])
+        self.assertEqual(
+            sum(message["role"] == "system" for message in child_second_call),
+            1,
+        )
 
     def test_nested_child_has_same_spawn_capability(self) -> None:
         def handler(messages, timeout):

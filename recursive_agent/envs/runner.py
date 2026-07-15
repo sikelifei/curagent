@@ -124,6 +124,8 @@ def _agent_trace_to_dict(trace: Any) -> dict[str, Any] | None:
             {
                 "number": step.number,
                 "response": step.response,
+                "model_observation": step.model_observation,
+                "observation_truncated": step.observation_truncated,
                 "code_executions": [
                     {
                         "code": execution.code,

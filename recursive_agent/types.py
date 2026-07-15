@@ -101,6 +101,8 @@ class AgentStep:
     number: int
     response: str
     code_executions: list[CodeExecutionTrace] = field(default_factory=list)
+    model_observation: str | None = None
+    observation_truncated: bool = False
     duration_seconds: float = 0.0
 
 

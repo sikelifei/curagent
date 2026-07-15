@@ -26,11 +26,14 @@ def analyze_environment_trace(trace: dict[str, Any]) -> dict[str, Any]:
     code_blocks = 0
     code_parse_errors = 0
     execution_errors = 0
+    observation_truncations = 0
     steps = 0
 
     for agent in agents:
         for step in agent.get("steps", []):
             steps += 1
+            if step.get("observation_truncated"):
+                observation_truncations += 1
             for execution in step.get("code_executions", []):
                 code_blocks += 1
                 variables.update(execution.get("variables") or [])
@@ -70,6 +73,7 @@ def analyze_environment_trace(trace: dict[str, Any]) -> dict[str, Any]:
         "repl_code_blocks": code_blocks,
         "code_parse_errors": code_parse_errors,
         "execution_errors": execution_errors,
+        "observation_truncations": observation_truncations,
         "variable_snapshots_present": code_blocks > 0 and bool(variables),
         "variables": sorted(variables),
         "tool_calls": {
@@ -133,6 +137,12 @@ def aggregate_trace_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "max_observed_depth": max((int(item["max_depth"]) for item in metrics), default=0),
         "episodes_with_execution_errors": sum(item["execution_errors"] > 0 for item in metrics),
         "total_execution_errors": sum(int(item["execution_errors"]) for item in metrics),
+        "episodes_with_observation_truncation": sum(
+            int(item.get("observation_truncations", 0)) > 0 for item in metrics
+        ),
+        "total_observation_truncations": sum(
+            int(item.get("observation_truncations", 0)) for item in metrics
+        ),
         "total_code_parse_errors": sum(int(item["code_parse_errors"]) for item in metrics),
         "episodes_with_forced_delegation_prompt": sum(
             bool(item["system_prompt_has_forced_delegation"]) for item in metrics
@@ -153,4 +163,3 @@ def _walk_agents(root: dict[str, Any] | None):
     yield root
     for child in root.get("children", []):
         yield from _walk_agents(child)
-

@@ -138,4 +138,19 @@ WebShop prompt/tool interface：明确 `search[keywords]` 是模板，必须替�
 真实查询；限制同一 episode 的重复 search/back/next；child 继续允许 act，
 但需要由模型明确 live-operation 委派，并禁止无目的递归 spawn。修正后再做
 模型横向测试，否则后续模型结果会被同一个 action/prompt 问题污染。
+
+## 统一 Agent Prompt 与 Observation 截断
+
+- root、child 和更深层 agent 现在使用完全相同的 system prompt、环境说明、
+  注册工具、REPL 与递归能力。
+- root/child 的唯一区别移到首次 user message：root 接收数据集任务；child
+  接收 parent 委派的 task，并获知显式 context 位于自己的 REPL `context` 中。
+- 每个 agent 只维护自己的消息历史；system message 在该历史中只有一条。
+- 新增 `max_observation_chars`，默认 8,000。超长 REPL/tool/environment
+  feedback 在进入下一次模型调用前保留首尾并截断，execution error 单独优先保留。
+- trace 中的原始 `code_executions[].output/error` 不截断；新增
+  `model_observation` 和 `observation_truncated` 记录模型实际可见内容。
+- WebShop 单条和 batch CLI 新增 `--max-observation-chars`；batch summary 新增
+  observation truncation episode/次数统计。
+- `python -m unittest discover -q`：30 项测试通过。
  

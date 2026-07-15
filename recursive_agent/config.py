@@ -43,6 +43,7 @@ class AgentConfig:
     max_depth: int = 4
     max_concurrent_subagents: int = 4
     max_run_seconds: float | None = None
+    max_observation_chars: int | None = 8000
 
     def __post_init__(self) -> None:
         if self.backend not in SUPPORTED_BACKENDS:
@@ -61,6 +62,13 @@ class AgentConfig:
             raise ConfigurationError("max_concurrent_subagents must be a positive integer")
         if self.max_run_seconds is not None and self.max_run_seconds <= 0:
             raise ConfigurationError("max_run_seconds must be positive when provided")
+        if self.max_observation_chars is not None and (
+            not isinstance(self.max_observation_chars, int)
+            or self.max_observation_chars <= 0
+        ):
+            raise ConfigurationError(
+                "max_observation_chars must be a positive integer or None"
+            )
 
 
 def load_model_config(path: str | Path) -> tuple[str, dict[str, Any]]:

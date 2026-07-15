@@ -99,6 +99,36 @@ class AgentCoreTests(unittest.TestCase):
         ).run("recover")
         self.assertEqual(result.answer, "recovered")
 
+    def test_long_observation_is_truncated_for_model_but_preserved_in_trace(self) -> None:
+        def handler(messages, timeout):
+            if len(messages) == 2:
+                return (
+                    "```repl\n"
+                    "print('HEAD-' + 'x' * 600 + '-TAIL')\n"
+                    "raise ValueError('important-error')\n```"
+                )
+            observation = messages[-1]["content"]
+            self.assertLessEqual(len(observation), 240)
+            self.assertIn("[truncated by harness:", observation)
+            self.assertIn("HEAD-", observation)
+            self.assertIn("Error: ValueError: important-error", observation)
+            return (
+                '```repl\nanswer["content"] = "handled"\n'
+                'answer["ready"] = True\n```'
+            )
+
+        result = RecursiveAgent(
+            backend_kwargs={"model_name": "fake"},
+            max_observation_chars=240,
+            client_factory=FakeFactory(handler),
+        ).run("truncate feedback")
+
+        first_step = result.trace.steps[0]
+        self.assertTrue(first_step.observation_truncated)
+        self.assertLessEqual(len(first_step.model_observation or ""), 240)
+        self.assertGreater(len(first_step.code_executions[0].output), 600)
+        self.assertIn("-TAIL", first_step.code_executions[0].output)
+
     def test_forced_final_is_one_extra_call_with_user_instruction(self) -> None:
         def handler(messages, timeout):
             if "No working steps remain" in messages[-1]["content"]:

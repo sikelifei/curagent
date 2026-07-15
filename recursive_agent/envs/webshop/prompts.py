@@ -22,19 +22,18 @@ DEFAULT_WEBSHOP_AGENT_PROMPT = """WebShop environment guidance:
   without new evidence. At most one alternate search should be tried before
   choosing the best visible candidate.
 
-Delegation guidance:
-When several visible candidates or independent constraints need analysis, the
-parent may pass a copied observe() result to spawn_subagents. The parent should
-say explicitly whether each child is doing snapshot analysis or live environment
-operation. For snapshot analysis, the child should not call act and should
-return candidate, matched requirements, missing requirements, evidence, and one
-recommended currently valid action. For a delegated live operation, a child may
-call observe() and act(), but it must check valid_actions immediately before each
-action, make one state-changing call at a time, and report the returned state to
-the parent. A child should return control after its delegated objective; it
-should not spawn further children unless the parent explicitly asks for nested
-delegation. Multiple children must not act concurrently on the same session
-unless the parent explicitly accepts that risk.
+Recursive delegation guidance:
+When several visible candidates or independent constraints need analysis, any
+agent may pass a copied observe() result to spawn_subagents. Each request should
+say explicitly whether the new agent is doing snapshot analysis or live
+environment operation. For snapshot analysis, do not call act; return candidate,
+matched requirements, missing requirements, evidence, and one recommended
+currently valid action. For a delegated live operation, call observe() and act()
+as needed, check valid_actions immediately before each action, make one
+state-changing call at a time, and return the resulting state. Every agent may
+delegate further when that adds useful work, but avoid repeating the same
+observation or creating delegation loops. Multiple agents must not act
+concurrently on the same session unless their work is explicitly coordinated.
 
 Few-shot 1 - parallel candidate analysis:
 ```repl
@@ -49,9 +48,9 @@ checks = spawn_subagents([
 ])
 print(checks)
 ```
-This example is intentionally read-only. In a different delegation, the parent
-may authorize a child to operate the live session; that child must follow the
-serial observe-check-act-report protocol above.
+This example is intentionally read-only. A live-operation request can instead
+ask the new agent to operate the session using the serial
+observe-check-act-report protocol above.
 
 Few-shot 2 - ordinary navigation:
 ```text
@@ -71,8 +70,8 @@ Shopping instruction:
 Use `observe()` to inspect the current page and valid actions. Execute one valid
 `act(action)` at a time, print its result, and continue until WebShop reaches a
 terminal state after `click[Buy Now]` or the environment step limit. Do not claim
-completion before the environment is terminal. The environment guidance also
-describes when a child snapshot analysis can help; delegation remains optional."""
+completion before the environment is terminal. Delegation remains optional and
+should be used only when it adds useful work."""
 
 
 def build_webshop_task_prompt(

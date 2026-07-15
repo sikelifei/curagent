@@ -56,5 +56,7 @@ class FakeFactory:
 
 def initial_task(messages: list[dict[str, Any]]) -> str:
     content = messages[1]["content"]
-    return content.split("Task:\n", 1)[1].split("\n\n", 1)[0]
-
+    for marker in ("Task:\n", "Delegated task:\n"):
+        if content.startswith(marker):
+            return content[len(marker) :].split("\n\n", 1)[0]
+    raise AssertionError(f"Unexpected initial user prompt: {content!r}")

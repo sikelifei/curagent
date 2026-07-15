@@ -21,6 +21,7 @@ def main() -> None:
     parser.add_argument("--max-depth", type=int, default=2)
     parser.add_argument("--max-concurrent-subagents", type=int, default=4)
     parser.add_argument("--max-run-seconds", type=float, default=900)
+    parser.add_argument("--max-observation-chars", type=int, default=8000)
     parser.add_argument(
         "--prompt-file",
         help="Optional UTF-8 task template containing the literal {instruction} placeholder.",
@@ -52,6 +53,7 @@ def main() -> None:
             "max_depth": args.max_depth,
             "max_concurrent_subagents": args.max_concurrent_subagents,
             "max_run_seconds": args.max_run_seconds,
+            "max_observation_chars": args.max_observation_chars,
         },
     )
     if args.trace_file:

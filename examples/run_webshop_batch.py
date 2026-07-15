@@ -31,6 +31,7 @@ def main() -> None:
     parser.add_argument("--max-depth", type=int, default=2)
     parser.add_argument("--max-concurrent-subagents", type=int, default=4)
     parser.add_argument("--max-run-seconds", type=float, default=900)
+    parser.add_argument("--max-observation-chars", type=int, default=8000)
     parser.add_argument("--trace-jsonl", default="outputs/webshop_200_traces.jsonl")
     parser.add_argument("--summary-json", default="outputs/webshop_200_summary.json")
     parser.add_argument("--resume", action="store_true")
@@ -106,6 +107,7 @@ def _run_one(
                 "max_depth": args.max_depth,
                 "max_concurrent_subagents": args.max_concurrent_subagents,
                 "max_run_seconds": args.max_run_seconds,
+                "max_observation_chars": args.max_observation_chars,
             },
         )
         trace = run.to_trace_dict()
@@ -195,4 +197,3 @@ def _write_json(path: Path, value: dict[str, Any]) -> None:
 
 if __name__ == "__main__":
     main()
-

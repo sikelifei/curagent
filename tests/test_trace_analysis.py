@@ -27,6 +27,7 @@ class TraceAnalysisTests(unittest.TestCase):
                     "depth": 0,
                     "steps": [
                         {
+                            "observation_truncated": True,
                             "code_executions": [
                                 {
                                     "code": "x = observe()\nspawn_subagent('check', x)\n",
@@ -58,6 +59,7 @@ class TraceAnalysisTests(unittest.TestCase):
         self.assertEqual(metrics["spawn_subagent_calls"], 1)
         self.assertEqual(metrics["tool_calls"]["observe"], 1)
         self.assertTrue(metrics["variable_snapshots_present"])
+        self.assertEqual(metrics["observation_truncations"], 1)
         self.assertEqual(metrics["variables"], ["context", "x"])
         self.assertFalse(metrics["system_prompt_has_forced_delegation"])
 
@@ -96,4 +98,3 @@ class TraceAnalysisTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

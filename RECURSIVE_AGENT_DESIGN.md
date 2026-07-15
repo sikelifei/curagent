@@ -135,6 +135,7 @@ agent = RecursiveAgent(
     max_steps=20,
     max_depth=4,
     max_concurrent_subagents=4,
+    max_observation_chars=8000,
     termination_check=env.status,  # 可选
 )
 
@@ -165,7 +166,7 @@ REPL 内部的 `spawn_subagent(s)` 只取 `AgentResult.answer` 返回给 parent�
        -> 追加 assistant response
        -> 顺序执行 response 中的 repl blocks
        -> 代码可以本地计算、调用 custom tool 或 spawn subagent
-       -> printed output 或执行错误作为一条 user observation 追加历史
+       -> printed output 或执行错误经过字符上限处理后作为 user observation 追加历史
        -> answer.ready 或 env done 时结束
   -> 未结束则额外执行一次 forced-final completion
   -> 清理当前 Agent 资源并返回 AgentResult
@@ -192,9 +193,9 @@ parent 和 child 的唯一区别是树中的 `depth` 和各自的 task/context�
 
 ## 6. 消息与 prompt 设计
 
-### 6.1 System prompt 草案
+### 6.1 System prompt
 
-system prompt 应保持短小，不指定 planner 身份，不强制拆任务：
+system prompt 对 root 和所有递归 child 完全相同，不指定 planner 身份，不强制拆任务。它由通用能力、环境 addendum 和注册工具描述组成：
 
 ```text
 You are a general recursive agent. Complete the task using your own reasoning,
@@ -218,10 +219,10 @@ Built-ins:
 - SHOW_VARS() -> str: list persistent REPL variables.
 - answer: set answer["content"] and then answer["ready"] = True when finished.
 
-Each child sees only the task and a private copy of the context you pass, not
-your history or local variables. Custom tools are the same registered objects
-for every agent and may access shared external state. Give each child all
-information needed for its task.
+Every agent has the same capabilities. A newly delegated agent starts its own
+message history and receives only its delegated task and a private copy of the
+context passed to it, not its caller's messages or REPL variables. Any agent
+may delegate recursively within the configured limits.
 
 {custom_tools}
 ```
@@ -230,18 +231,27 @@ information needed for its task.
 
 ### 6.2 初始 user message
 
-原始问题只显式出现一次：
+root 的数据集任务只显式出现一次：
 
 ```text
 Task:
 {task}
+```
 
-Additional context is available in the REPL variable `context`.
+child 使用相同 system prompt，但第一条 user message 标明任务来源和 context 语义：
+
+```text
+Delegated task:
+{task}
+
+This task was supplied by another agent. A private copy of the context it
+supplied is available in the REPL variable `context`.
 ```
 
 - `task` 不再同时作为隐藏的 REPL context。
 - `context` 无论大小都只放进 REPL，不在每轮复制。
-- child 的 `task` 同样进入 child 的初始 user message，而不是只放进 `context`。
+- child 的 `task` 进入 child 的初始 user message，显式 context 值放进其独立 REPL。
+- root 和 child 的能力、环境 prompt、工具和循环完全一致；差异只在首次任务消息。
 - 不再追加字符数、长文本容量、chunk size 等 metadata。
 
 ### 6.3 后续消息
@@ -252,6 +262,12 @@ Additional context is available in the REPL variable `context`.
 - 代码执行但无输出时追加：`REPL output:\n(no output)`。
 - response 没有 `repl` block 时，只追加一个最短的 `Continue.`，让模型可以先在文本中分析再自行决定下一步。
 - 不再每轮追加 `Turn i/n`、任务复述或操作建议。
+
+模型可见的单轮 observation 默认限制为 8,000 字符，由
+`max_observation_chars` 配置。超限时 harness 保留输出首尾、截断标记和错误摘要。
+完整 stdout/error 仍进入 execution trace；trace 另外记录模型实际看到的
+`model_observation` 与 `observation_truncated`。该限制按字符计算，不假设不同
+provider 使用相同 tokenizer；设置为 `None` 可关闭。
 
 ### 6.4 强制最终答案
 
@@ -381,7 +397,7 @@ class EnvironmentStatus:
 | 情况 | 行为 |
 | --- | --- |
 | 非法配置、非法 tool 名 | 启动前直接抛出配置异常 |
-| Python 语法、变量或 custom tool 异常 | 捕获为本轮 error observation，让模型自行决定如何修正 |
+| Python 语法、变量或 custom tool 异常 | 捕获为本轮 error observation；超限时截断正文并优先保留错误摘要，让模型自行修正 |
 | 单个 child 失败 | `spawn_subagent` 返回简短 `Error: ...` 字符串 |
 | batch 中部分 child 失败 | 失败位置返回错误字符串，其他结果保留且整体仍按输入顺序 |
 | 达到 `max_depth` | spawn 返回 limit error，当前 Agent 继续运行 |
@@ -396,6 +412,7 @@ class EnvironmentStatus:
 - `max_depth`：递归深度硬上限。
 - `max_concurrent_subagents`：每次 batch 调用自己的物理 worker 上限，不是全树调度策略。
 - `max_run_seconds`：root 和整棵递归树共享的 cooperative deadline。
+- `max_observation_chars`：每个 Agent 每轮模型可见 REPL/tool feedback 的字符上限；不裁剪 trace 中的原始 execution 输出。
 
 线程内已经运行的同步 Python、custom tool 或 provider 请求不能被可靠硬中止。timeout 和 cancel 在首版是 cooperative/best-effort 语义：在同步调用返回后检查并停止后续工作。若将来需要硬终止，必须改用可杀掉的独立进程。
 

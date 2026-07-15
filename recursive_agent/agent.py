@@ -109,6 +109,7 @@ class RecursiveAgent:
         max_depth: int = 4,
         max_concurrent_subagents: int = 4,
         max_run_seconds: float | None = None,
+        max_observation_chars: int | None = 8000,
         termination_check: TerminationCheck | None = None,
         prompt_addendum: str | None = None,
         client_factory: ClientFactory | None = None,
@@ -120,6 +121,7 @@ class RecursiveAgent:
             max_depth=max_depth,
             max_concurrent_subagents=max_concurrent_subagents,
             max_run_seconds=max_run_seconds,
+            max_observation_chars=max_observation_chars,
         )
         self._tools: dict[str, ToolInfo] = parse_tools(tools)
         self._tool_values = tool_values(self._tools)
@@ -127,7 +129,6 @@ class RecursiveAgent:
         self._prompt_addendum = str(prompt_addendum).strip() if prompt_addendum else None
         self._system_prompt = build_system_prompt(
             self._formatted_tools,
-            role="root",
             prompt_addendum=self._prompt_addendum,
         )
         self._termination_check = termination_check
@@ -203,16 +204,20 @@ class RecursiveAgent:
 
         started = time.perf_counter()
         client = self._make_client()
-        role = "subagent" if parent_trace is not None else "root"
         system_prompt = build_system_prompt(
             self._formatted_tools,
-            role=role,
             prompt_addendum=self._prompt_addendum,
         )
         trace.system_prompt = system_prompt
         messages: list[dict[str, str]] = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": build_initial_user(task)},
+            {
+                "role": "user",
+                "content": build_initial_user(
+                    task,
+                    delegated=parent_trace is not None,
+                ),
+            },
         ]
         latest_response: str | None = None
         local_usage = _UsageAccumulator()
@@ -263,10 +268,13 @@ class RecursiveAgent:
                     continue
 
                 observations: list[str] = []
+                observation_errors: list[str] = []
                 for code in code_blocks:
                     execution = repl.execute(code)
                     step_trace.code_executions.append(execution.trace)
                     observations.append(execution.trace.output or "(no output)")
+                    if execution.trace.error:
+                        observation_errors.append(execution.trace.error)
                     run_context.check()
 
                     if execution.answer_ready:
@@ -295,8 +303,15 @@ class RecursiveAgent:
                                 run_context=run_context,
                                 local_usage=local_usage,
                             )
+                        model_observation, was_truncated = _format_observations(
+                            observations,
+                            errors=observation_errors,
+                            max_chars=self.config.max_observation_chars,
+                        )
+                        step_trace.model_observation = model_observation
+                        step_trace.observation_truncated = was_truncated
                         messages.append(
-                            {"role": "user", "content": _format_observations(observations)}
+                            {"role": "user", "content": model_observation}
                         )
                         return self._forced_final(
                             client=client,
@@ -309,7 +324,14 @@ class RecursiveAgent:
                             local_usage=local_usage,
                         )
 
-                messages.append({"role": "user", "content": _format_observations(observations)})
+                model_observation, was_truncated = _format_observations(
+                    observations,
+                    errors=observation_errors,
+                    max_chars=self.config.max_observation_chars,
+                )
+                step_trace.model_observation = model_observation
+                step_trace.observation_truncated = was_truncated
+                messages.append({"role": "user", "content": model_observation})
                 step_trace.duration_seconds = time.perf_counter() - step_started
 
             return self._forced_final(
@@ -563,5 +585,52 @@ class RecursiveAgent:
         return normalized
 
 
-def _format_observations(observations: list[str]) -> str:
-    return "REPL output:\n" + "\n\n".join(observations or ["(no output)"])
+def _format_observations(
+    observations: list[str],
+    *,
+    errors: list[str] | None = None,
+    max_chars: int | None = 8000,
+) -> tuple[str, bool]:
+    prefix = "REPL output:\n"
+    body = "\n\n".join(observations or ["(no output)"])
+    message = prefix + body
+    if max_chars is None or len(message) <= max_chars:
+        return message, False
+
+    marker = (
+        f"[truncated by harness: original_chars={len(message)}, "
+        f"limit_chars={max_chars}]\n"
+    )
+    fixed = prefix + marker
+    available = max(0, max_chars - len(fixed))
+    unique_errors = list(dict.fromkeys(error for error in (errors or []) if error))
+    visible_source = body
+    for error in unique_errors:
+        visible_source = visible_source.replace(error, "")
+    visible_source = visible_source.rstrip()
+
+    error_section = ""
+    if unique_errors and available:
+        raw_errors = "\n\nPreserved execution errors:\n" + "\n".join(unique_errors)
+        error_budget = min(len(raw_errors), max(1, available // 2))
+        error_section = _fit_head_and_tail(raw_errors, error_budget)
+
+    body_budget = max(0, available - len(error_section))
+    visible_body = _fit_head_and_tail(visible_source, body_budget)
+    result = fixed + visible_body + error_section
+    return result[:max_chars], True
+
+
+def _fit_head_and_tail(text: str, max_chars: int) -> str:
+    if max_chars <= 0:
+        return ""
+    if len(text) <= max_chars:
+        return text
+    separator = "\n... [truncated] ...\n"
+    if max_chars <= len(separator):
+        return text[:max_chars]
+    content_chars = max_chars - len(separator)
+    head_chars = (content_chars + 1) // 2
+    tail_chars = content_chars - head_chars
+    tail = text[-tail_chars:] if tail_chars else ""
+    return text[:head_chars] + separator + tail

@@ -68,6 +68,7 @@ class ReplToolsConfigTests(unittest.TestCase):
             {"max_depth": -1},
             {"max_concurrent_subagents": 0},
             {"max_run_seconds": 0},
+            {"max_observation_chars": 0},
         ):
             with self.subTest(kwargs=kwargs), self.assertRaises(ConfigurationError):
                 RecursiveAgent(backend_kwargs={"model_name": "fake"}, **kwargs)
