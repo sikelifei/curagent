@@ -18,16 +18,22 @@ MODE RULES:
 PRIVATE CONTEXT:
 - The private REPL variable `context` is a dict. The full transcript is in
   `context["context_window_text"]`; the question is in `context["question"]`.
-  A child receives a copied chunk plus `context["mapping"]` and
-  `context["chunk_index"]`.
+  A child receives a copied chunk plus `context["mapping"]`,
+  `context["episode_index"]`, and `context["chunk_index"]`.
 - Never print the full transcript. The root must split it into disjoint,
-  line-preserving chunks of at most about 12,000 characters.
-- Only count text between `[START OF EPISODE]` and `[END OF EPISODE]`.
-  The preamble itself mentions these literal marker strings, so use the last
-  occurrence of each marker (`rfind`), never the first `find` or
-  `split(..., 1)` occurrence.
-  Ignore the question, instructions, player/character mapping prose, character
-  backstories, advertisements, and all text after `[END OF EPISODE]`.
+  line-preserving chunks of at most about 12,000 characters. This keeps each
+  child request far below the roughly 500K-character child context capacity
+  while keeping each auditor's semantic scan small enough to finish reliably.
+- Only count text inside actual episode blocks whose marker lines are exactly
+  `[START OF EPISODE]` and `[END OF EPISODE]`. The preamble mentions these
+  strings inline, so detect standalone marker lines with a multiline regex,
+  not `rfind`, `find`, or `split(..., 1)`.
+- A context may contain many episodes. For `episode N` questions select that
+  episode; for cumulative-through-episode-N questions select episodes 1..N;
+  for `across all`, `each episode`, or `all episodes` select every episode.
+  For `this episode`, select the only block when there is one. Ignore the
+  question, instructions, mapping prose, backstories, advertisements, and all
+  text outside selected episode blocks.
 
 WHAT COUNTS AS A ROLL:
 - Count one actual die/check result once. A result must be tied to a declared
@@ -47,14 +53,23 @@ WHAT COUNTS AS A ROLL:
   explicit natural die values, not totals after modifiers.
 
 CHILD REPORT SCHEMA:
-- A valid child report is a JSON object with exactly these useful fields:
-  `chunk_index`, `records`, and `uncertain`.
-- `records` is a list of objects with `speaker`, `character`, `kind`,
-  `roll_value`, `natural_value`, and a short `evidence` string. `roll_value` is
-  the explicit result or damage total; `natural_value` is populated only when
-  the transcript explicitly gives the unmodified die value. A damage total such
-  as 25 is not a natural value of 25. Use JSON `null` when a field is unknown.
-  Each record represents one local die/check result, not an aggregate number.
+- A valid child report is a JSON object with `chunk_index`, `episode_index`,
+  `rolls`, `spells`, and `uncertain`. Do not emit one long record per event.
+- `rolls` is a compact object with integer `total`, plus count maps named
+  `by_player`, `by_character`, `by_type`, `by_value`, and `by_natural_value`.
+  Include only keys observed in this chunk. `total` counts actual die/check
+  results, not mentions of the word roll. A sentence such as `I rolled a 20
+  and a 17. So 19.` contributes two results, not three; the final check total
+  is not another die. `by_natural_value` includes only explicit unmodified die
+  values. Also include `relevant_values`, a short list of objects with
+  `speaker`, `character`, `type`, `value`, `natural_value`, and `evidence` when
+  the question asks for a particular value or roll.
+- `spells` is a compact object with integer `total`, count maps named
+  `by_player`, `by_character`, and `by_name`, and chronological `ordered` spell
+  events. An ordered event has `name`, `speaker`, `character`, `level`, and
+  `base_level`; use JSON `null` for unknown levels. Keep only the first/last
+  few events when the question asks for first/last spells, but retain counts
+  for count questions.
 - `uncertain` is at most three short snippets, each at most 120 characters. Never
   copy a backstory or transcript paragraph into the report. Never put prose
   outside the JSON report. Malformed reports are not evidence and must be
@@ -78,22 +93,23 @@ ROOT RUNBOOK:
   best explicitly supported candidate rather than entering another exploratory
   loop. Never return prose-only or an unclosed REPL block.
 
-Few-shot 1 - initialize bounded, disjoint chunks and pass the mapping to every child:
+Few-shot 1 - identify all real episode blocks and initialize bounded chunks:
 ```repl
 import json
+import re
 
 source = context["context_window_text"]
 query = context["question"]
-start_marker = "[START OF EPISODE]"
-end_marker = "[END OF EPISODE]"
-start = source.rfind(start_marker)
-end = source.rfind(end_marker)
-mapping = source[:start] if start >= 0 else ""
-episode_text = (
-    source[start:end + len(end_marker)]
-    if start >= 0 and end >= start
-    else source
-)
+start_re = re.compile(r"(?m)^\[START OF EPISODE\]\s*$")
+end_re = re.compile(r"(?m)^\[END OF EPISODE\]\s*$")
+starts = list(start_re.finditer(source))
+mapping = source[:starts[0].start()] if starts else ""
+episodes = []
+for episode_index, match in enumerate(starts, 1):
+    end = end_re.search(source, match.end())
+    if end:
+        episodes.append((episode_index, source[match.start():end.end()]))
+
 player_to_character = {}
 for line in mapping.splitlines():
     mapping_marker = " plays the character "
@@ -113,26 +129,48 @@ def chunk_text(text, max_chars=12000):
         chunks.append("".join(current))
     return chunks
 
-chunks = chunk_text(episode_text)
-evidence = []
-print({"question": query, "chunks": len(chunks),
-       "max_chunk_chars": max([len(chunk) for chunk in chunks], default=0)})
+requested = [int(x) for x in re.findall(r"episode\s+(\d+)", query, re.I)]
+if re.search(r"across all|each episode|all episodes", query, re.I):
+    selected = episodes
+elif re.search(r"cummulative|cumulative", query, re.I) and requested:
+    selected = [item for item in episodes if item[0] <= requested[-1]]
+elif requested:
+    selected = [item for item in episodes if item[0] == requested[-1]]
+else:
+    selected = episodes
+
+chunks = [
+    {"episode_index": episode_index, "text": chunk}
+    for episode_index, episode_text in selected
+    for chunk in chunk_text(episode_text)
+]
+print({"episodes": len(selected), "chunks": len(chunks),
+       "max_chunk_chars": max([len(item["text"]) for item in chunks], default=0)})
 ```
 
-Few-shot 2 - one child report is structured JSON, not a free-form delta:
+Few-shot 2 - a child returns additive statistics, not a truncated event list:
 ```repl
 import json
 
 toy_report = {
     "chunk_index": 0,
-    "records": [{
-        "speaker": "Marisha",
-        "character": "Keyleth",
-        "kind": "Perception",
-        "roll_value": 14,
-        "natural_value": 14,
-        "evidence": "Matt: Make a perception check. Marisha: 14.",
-    }],
+    "episode_index": 1,
+    "rolls": {
+        "total": 2,
+        "by_player": {"Marisha": 2},
+        "by_character": {"Keyleth": 2},
+        "by_type": {"Perception": 2},
+        "by_value": {"14": 1, "7": 1},
+        "by_natural_value": {"14": 1},
+        "relevant_values": [],
+    },
+    "spells": {
+        "total": 0,
+        "by_player": {},
+        "by_character": {},
+        "by_name": {},
+        "ordered": [],
+    },
     "uncertain": [],
 }
 answer["content"] = json.dumps(toy_report, ensure_ascii=False)
@@ -141,52 +179,71 @@ answer["ready"] = True
 
 Few-shot 3 - fan out independent read-only chunk auditors:
 ```repl
+focus = (
+    "This is a roll question. Analyze rolls only and set spells to zero with "
+    "empty maps/lists; do not scan spell names. "
+    if str(context.get("question_type", "")).endswith("rolls")
+    else
+    "This is a spell question. Analyze spells only and set rolls to zero with "
+    "empty maps/lists; do not scan die results. "
+)
+
 requests = [
     {
         "task": (
-            "[CHILD JSON CONTRACT] Inspect only context['context_window_text']; "
-            "analyze only the episode portion between the START and END markers. "
-            "Never call an environment tool or delegate. Count explicit D&D die "
-            "results exactly once and use context['mapping'] for speaker names. "
-            "Your entire response must be exactly one repl block. In that block, "
-            "import json, construct a JSON object with chunk_index, records, and "
-            "uncertain, set answer['content'] = json.dumps(report), and set "
-            "answer['ready'] = True. Do not write prose, analysis, or another "
-            "code block. Each record must include speaker, mapped character, kind, "
-            "roll_value, natural_value, and one short evidence string. Return an "
-            "empty records list immediately when there is no explicit result. "
-            "Example: 'Matt: Make a perception check. Marisha: 14.' is one "
-            "record; 'Roll well!' and 'what did you roll?' are not records; "
-            "'25 points of damage' has roll_value 25 and natural_value null. "
+            focus +
+            "[CHILD JSON CONTRACT] Inspect only context['context_window_text'] "
+            "for episode context['episode_index']; never delegate or call an "
+            "environment tool. The transcript uses natural speaker utterances, "
+            "not one numeric result per line, so do semantic extraction rather "
+            "than a regex requiring exactly 'Speaker: number'. Count each "
+            "explicit die/check result once. Do not count 'roll well', 'what did "
+            "you roll?', or a repeated total. Use context['mapping'] to map player "
+            "to character. Return exactly one final repl block with a JSON object "
+            "containing chunk_index, episode_index, rolls, spells, and uncertain; "
+            "set answer['content'] = json.dumps(report) and answer['ready'] = True. "
+            "For rolls fill additive totals/maps; for spells fill additive totals, "
+            "name maps, and chronological events needed for first/last/list "
+            "questions. A sentence like 'I rolled a 20 and a 17. So 19.' means "
+            "two rolls, not three. A damage/check total is not a natural value. "
             "Question: " + query
         ),
         "context": {
-            "context_window_text": chunk,
+            "context_window_text": chunk["text"],
             "question": query,
             "mapping": player_to_character,
+            "question_type": context.get("question_type"),
+            "episode_index": chunk["episode_index"],
             "chunk_index": i,
         },
     }
     for i, chunk in enumerate(chunks)
 ]
 evidence = spawn_subagents(requests)
-print({"processed_chunks": len(evidence),
-       "evidence_chars": sum(len(item) for item in evidence)})
 ```
 
 Few-shot 4 - aggregate and submit in the same root execution:
 ```repl
 aggregate = spawn_subagent(
     "[AGGREGATOR JSON CONTRACT] You are read-only: do not call tools or delegate. "
-    "Parse only valid JSON child reports from context['reports']. Ignore malformed "
-    "reports and snippets outside the episode. The chunks are disjoint, so do not "
-    "subtract reports merely because speakers or numbers repeat. Filter records "
-    "using context['question'], mapping, kind, roll_value, and natural_value; count records, "
-    "not prose mentions. Return exactly one repl block that imports json, sets "
-    "result = {'candidate': ..., 'used_chunks': [...], 'uncertain': [...]}, then "
-    "sets answer['content'] = json.dumps(result) and answer['ready'] = True. "
+    "Parse only valid JSON child reports from context['reports']; ignore malformed "
+    "reports. Reports are disjoint chunks, so sum their additive maps and totals "
+    "within each episode before applying the question filter. For cumulative "
+    "episode N use episodes 1..N; for across-all use every episode; for a single "
+    "episode use that episode. Use by_player/by_character/by_type/by_value and "
+    "by_natural_value for roll questions. Use spell by_* maps and ordered events "
+    "for spell questions. Do not count prose mentions. Return exactly one repl "
+    "block that imports json, sets result = {'candidate': ..., 'used_chunks': [...], "
+    "'uncertain': [...]}, then sets answer['content'] = json.dumps(result) and "
+    "answer['ready'] = True. The candidate may be an integer or the exact comma "
+    "separated string requested by the question. "
     "Question: " + query,
-    {"question": query, "mapping": player_to_character, "reports": evidence},
+    {
+        "question": query,
+        "question_type": context.get("question_type"),
+        "mapping": player_to_character,
+        "reports": evidence,
+    },
 )
 
 import json

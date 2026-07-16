@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from ..agent import RecursiveAgent
+from ..config import load_model_config
 from ..types import AgentResult
 from .base import AgentEnvironment
 from .registry import create_environment
@@ -47,6 +48,7 @@ def run_environment(
     *,
     model_config: str | Path,
     agent_kwargs: dict[str, Any] | None = None,
+    model_overrides: dict[str, Any] | None = None,
 ) -> EnvironmentRunResult:
     """Run and close one initialized environment episode."""
     kwargs = dict(agent_kwargs or {})
@@ -59,8 +61,11 @@ def run_environment(
         task_prompt = environment.task
         initial_context = copy.deepcopy(environment.context)
         tools = environment.tools()
-        agent = RecursiveAgent.from_config(
-            str(model_config),
+        backend, backend_kwargs = load_model_config(model_config)
+        backend_kwargs = _merge_nested(backend_kwargs, dict(model_overrides or {}))
+        agent = RecursiveAgent(
+            backend=backend,
+            backend_kwargs=backend_kwargs,
             tools=tools,
             termination_check=environment.status,
             prompt_addendum=environment.agent_prompt,
@@ -86,13 +91,25 @@ def run_registered_environment(
     model_config: str | Path,
     environment_kwargs: dict[str, Any] | None = None,
     agent_kwargs: dict[str, Any] | None = None,
+    model_overrides: dict[str, Any] | None = None,
 ) -> EnvironmentRunResult:
     environment = create_environment(name, **dict(environment_kwargs or {}))
     return run_environment(
         environment,
         model_config=model_config,
         agent_kwargs=agent_kwargs,
+        model_overrides=model_overrides,
     )
+
+
+def _merge_nested(base: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(base)
+    for key, value in overrides.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _merge_nested(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
 
 
 def _describe_tools(tools: dict[str, Any]) -> dict[str, dict[str, Any]]:

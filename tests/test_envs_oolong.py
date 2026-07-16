@@ -93,7 +93,8 @@ class OolongEnvironmentTests(unittest.TestCase):
         self.assertIn("Oolong-real environment guidance", environment.agent_prompt)
         self.assertIn("spawn_subagents", environment.agent_prompt)
         self.assertIn("chunk_text", environment.agent_prompt)
-        self.assertIn("records", environment.agent_prompt)
+        self.assertIn("rolls", environment.agent_prompt)
+        self.assertIn("by_natural_value", environment.agent_prompt)
         self.assertIn("[START OF EPISODE]", environment.agent_prompt)
         self.assertIn("rfind", environment.agent_prompt)
         self.assertEqual(

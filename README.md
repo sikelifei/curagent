@@ -238,3 +238,40 @@ python -m examples.run_oolong_batch \
 ```
 
 The Oolong plugin keeps the root prompt and recursive agent unchanged. Its environment prompt describes the read-only long context, and the `submit_answer(...)` tool records the `\\boxed{...}` response, parser confidence, and DnD score in the environment report.
+
+### Oolong-Synthetic recursive evaluation
+
+`oolong_synth` is a separate environment for evaluating curagent on the
+Oolong-Synthetic validation protocol. The root reads the unlabeled long context
+from the private REPL, splits complete data rows into disjoint chunks, delegates
+semantic classification/statistics to read-only children, aggregates compact
+JSON reports, and submits the exact answer format requested by the sample.
+`--data-path` accepts a JSON/JSONL file, one parquet file, or a downloaded
+dataset directory containing `data/validation-*.parquet`.
+
+Inspect every prompt layer without loading data or calling a model:
+
+```bash
+python -m examples.print_oolong_synth_prompts
+```
+
+Prepare the deterministic 199-row, context-length-stratified manifest and exact
+prompt snapshot without calling DeepSeek:
+
+```bash
+HF_ENDPOINT=https://hf-mirror.com python -m examples.run_oolong_synth \
+  --config configs/model_api.local.yaml \
+  --split validation \
+  --sample-count 199 \
+  --selection-seed 42 \
+  --temperature 0 \
+  --prepare-only
+```
+
+After prompt review, remove `--prepare-only` to run. The runner defaults to
+DeepSeek-V4-Flash through `configs/model_api.local.yaml`, overrides sampling to
+temperature 0 and 4096 output tokens, supports `--resume`, counts failed rows as
+zero, and reports the micro-average Oolong score, answer-type/context-length
+breakdowns, and a 10,000-resample bootstrap 95% confidence interval. This is a
+comparable curagent evaluation with its own deterministic sample manifest, not
+an exact reproduction of the paper's unpublished 199-row selection.
