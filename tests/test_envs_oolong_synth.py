@@ -51,6 +51,9 @@ class OolongSynthEnvironmentTests(unittest.TestCase):
         self.assertNotIn("answer", environment.context)
         self.assertNotIn("gold", environment.context)
         self.assertIn("child_task_template", environment.context)
+        self.assertEqual(environment.context["oolong_role"], "root")
+        self.assertNotIn("context_len", environment.context)
+        self.assertNotIn("context_chars", environment.context)
 
     def test_downloaded_validation_parquet_directory_loads(self) -> None:
         try:
@@ -128,21 +131,27 @@ class OolongSynthEnvironmentTests(unittest.TestCase):
         lengths = Counter(metadata[index]["context_len"] for index in first)
         self.assertEqual(set(lengths.values()), {15, 16})
 
-    def test_prompt_repl_examples_parse_and_registry_is_loaded(self) -> None:
-        blocks = []
-        marker = "```repl"
-        start = 0
-        while True:
-            start = DEFAULT_SYNTH_AGENT_PROMPT.find(marker, start)
-            if start < 0:
-                break
-            code_start = start + len(marker)
-            code_end = DEFAULT_SYNTH_AGENT_PROMPT.find("```", code_start)
-            blocks.append(DEFAULT_SYNTH_AGENT_PROMPT[code_start:code_end].strip())
-            start = code_end + 3
-        self.assertEqual(len(blocks), 3)
+    def test_prompt_uses_model_selected_decomposition_and_registry_is_loaded(self) -> None:
+        self.assertIn('context["oolong_role"]', DEFAULT_SYNTH_AGENT_PROMPT)
+        self.assertIn("Measure its character length", DEFAULT_SYNTH_AGENT_PROMPT)
+        self.assertIn("does not pre-split", DEFAULT_SYNTH_AGENT_PROMPT)
+        self.assertIn("metadata-only questions", DEFAULT_SYNTH_AGENT_PROMPT)
+        self.assertIn("expected_rows", DEFAULT_SYNTH_AGENT_PROMPT)
+        self.assertIn("NEVER call `submit_answer`", DEFAULT_SYNTH_AGENT_PROMPT)
+        self.assertIn("exactly this Markdown shape", DEFAULT_SYNTH_AGENT_PROMPT)
+        self.assertIn("Never use `python`, `<repl>`, bare `repl`", DEFAULT_SYNTH_AGENT_PROMPT)
+        self.assertIn("first response must be exactly the single block", DEFAULT_SYNTH_AGENT_PROMPT)
+        self.assertIn('"context_chars": len(source)', DEFAULT_SYNTH_AGENT_PROMPT)
+        self.assertIn("This is not\n   JSON or JSONL", DEFAULT_SYNTH_AGENT_PROMPT)
+        self.assertIn("records are intentionally UNLABELED", DEFAULT_SYNTH_AGENT_PROMPT)
+        self.assertIn("route immediately", DEFAULT_SYNTH_AGENT_PROMPT)
+        self.assertNotIn("8_000", DEFAULT_SYNTH_AGENT_PROMPT)
+        self.assertNotIn("max_chars=", DEFAULT_SYNTH_AGENT_PROMPT)
+        self.assertNotIn("EXACTLY FOUR", DEFAULT_SYNTH_AGENT_PROMPT)
+        blocks = DEFAULT_SYNTH_AGENT_PROMPT.split("```repl\n")[1:]
+        self.assertGreaterEqual(len(blocks), 2)
         for block in blocks:
-            ast.parse(block)
+            ast.parse(block.split("```", 1)[0])
         self.assertIn("oolong_synth", available_environments())
 
 

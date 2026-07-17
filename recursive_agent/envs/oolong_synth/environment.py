@@ -17,7 +17,6 @@ from .dataset import (
 )
 from .prompts import (
     CHILD_TASK_TEMPLATE,
-    DEFAULT_CHUNK_CHARS,
     DEFAULT_SYNTH_TASK_TEMPLATE,
     build_synth_agent_prompt,
     build_synth_task_prompt,
@@ -41,7 +40,6 @@ class OolongSynthEnvironment(AgentEnvironment):
         samples: Sequence[Mapping[str, Any]] | None = None,
         loader: Any | None = None,
         load_kwargs: Mapping[str, Any] | None = None,
-        chunk_chars: int = DEFAULT_CHUNK_CHARS,
         prompt_template: str = DEFAULT_SYNTH_TASK_TEMPLATE,
         agent_prompt: str | None = None,
     ) -> None:
@@ -59,12 +57,13 @@ class OolongSynthEnvironment(AgentEnvironment):
         self._agent_prompt = (
             str(agent_prompt).strip()
             if agent_prompt is not None
-            else build_synth_agent_prompt(chunk_chars)
+            else build_synth_agent_prompt()
         )
         self._submitted_answer: str | None = None
         self._closed = False
         self._tools = build_synth_tools(self)
         self._context = {
+            "oolong_role": "root",
             "environment": self.name,
             "dataset": self.sample.dataset,
             "dataset_name": self.dataset.dataset_name,
@@ -77,11 +76,8 @@ class OolongSynthEnvironment(AgentEnvironment):
             "task_group": self.sample.task_group,
             "task": self.sample.task,
             "input_subset": self.sample.input_subset,
-            "context_len": self.sample.context_len,
-            "context_chars": len(self.sample.context_window_text),
             "context_window_text": self.sample.context_window_text,
             "child_task_template": CHILD_TASK_TEMPLATE,
-            "chunk_chars": int(chunk_chars),
             "source": self.dataset.metadata()["source"],
         }
 

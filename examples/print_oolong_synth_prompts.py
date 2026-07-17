@@ -51,6 +51,10 @@ def main() -> None:
                 delegated=True,
             ),
         ),
+        (
+            "ROOT PRIVATE CONTEXT FIELDS",
+            "\n".join(sorted(environment.context)),
+        ),
         ("FORCED FINAL USER PROMPT", FORCED_FINAL_USER),
     ]
     rendered = "\n".join(

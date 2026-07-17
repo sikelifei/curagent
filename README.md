@@ -242,10 +242,11 @@ The Oolong plugin keeps the root prompt and recursive agent unchanged. Its envir
 ### Oolong-Synthetic recursive evaluation
 
 `oolong_synth` is a separate environment for evaluating curagent on the
-Oolong-Synthetic validation protocol. The root reads the unlabeled long context
-from the private REPL, splits complete data rows into disjoint chunks, delegates
-semantic classification/statistics to read-only children, aggregates compact
-JSON reports, and submits the exact answer format requested by the sample.
+Oolong-Synthetic validation protocol. The environment supplies the unlabeled
+long context without pre-chunking it. The root measures the actual full and
+question-filtered sizes in the private REPL, then chooses direct metadata
+parsing or its own complete-row subagent distribution. Semantic workers return
+coverage-checked JSON reports, and only the root submits the final answer.
 `--data-path` accepts a JSON/JSONL file, one parquet file, or a downloaded
 dataset directory containing `data/validation-*.parquet`.
 

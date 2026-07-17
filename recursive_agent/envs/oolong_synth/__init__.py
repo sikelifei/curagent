@@ -8,7 +8,6 @@ from .dataset import (
 from .environment import OolongSynthEnvironment
 from .prompts import (
     CHILD_TASK_TEMPLATE,
-    DEFAULT_CHUNK_CHARS,
     DEFAULT_SYNTH_AGENT_PROMPT,
     DEFAULT_SYNTH_TASK_TEMPLATE,
     build_synth_agent_prompt,
@@ -23,7 +22,6 @@ from .scoring import (
 
 __all__ = [
     "CHILD_TASK_TEMPLATE",
-    "DEFAULT_CHUNK_CHARS",
     "DEFAULT_SYNTH_AGENT_PROMPT",
     "DEFAULT_SYNTH_TASK_TEMPLATE",
     "OolongSynthDataset",
