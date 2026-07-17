@@ -227,8 +227,15 @@ class ReplSession:
 
 
 def find_repl_blocks(text: str) -> list[str]:
-    """Extract fenced repl blocks while allowing a final fence at end of text."""
+    """Extract fenced or XML-style repl blocks in their source order."""
     import re
 
-    pattern = re.compile(r"```repl[ \t]*\r?\n(.*?)(?:\r?\n)?```", re.DOTALL)
-    return [match.group(1).strip() for match in pattern.finditer(text)]
+    pattern = re.compile(
+        r"```repl[ \t]*\r?\n(.*?)(?:\r?\n)?```"
+        r"|<repl[ \t]*>(.*?)</repl[ \t]*>",
+        re.DOTALL | re.IGNORECASE,
+    )
+    blocks = []
+    for match in pattern.finditer(text):
+        blocks.append((match.start(), (match.group(1) or match.group(2)).strip()))
+    return [code for _, code in sorted(blocks)]

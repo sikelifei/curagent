@@ -44,6 +44,16 @@ class ReplToolsConfigTests(unittest.TestCase):
             ["print(1)", "a=2"],
         )
 
+    def test_repl_block_parser_accepts_xml_style_blocks_in_source_order(self) -> None:
+        self.assertEqual(
+            find_repl_blocks(
+                "<repl>print(1)</repl>\n"
+                "```repl\nprint(2)\n```\n"
+                "<REPL>print(3)</REPL>"
+            ),
+            ["print(1)", "print(2)", "print(3)"],
+        )
+
     def test_model_yaml_loader(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "model.yaml"
