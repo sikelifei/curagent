@@ -33,15 +33,34 @@ The same sample with a 12,000-character observation limit, depth 1, and a
 Output directory:
 `outputs/oolong_synth/deepseek_v4_flash_adaptive_1m_full_semantic_20260717`.
 
-## Sequential Runs
+## Prompt Flows
 
-| Run | Observation limit | Max depth | Prompt flow | Result | Duration |
-| --- | ---: | ---: | --- | --- | ---: |
-| A | 200,000 | 1 | adaptive | running | - |
-| B | 50,000 | 1 | adaptive | pending | - |
-| C | 200,000 | 2 | recursive | pending | - |
+The original A prompt is preserved byte-for-byte in
+`recursive_agent/envs/oolong_synth/prompts.py`. The selectable alternatives
+live in `flow_prompts.py` and are selected with `--prompt-flow`:
 
-Run A command:
+- `adaptive_flat`: original model-selected adaptive prompt, depth 1.
+- `paged_flat`: flat workers with bounded pages, depth 1.
+- `hierarchical`: root creates coarse ranges; `can_delegate=True` workers
+  create leaf ranges with `can_delegate=False`, depth 2.
+
+The generic root prompt in `recursive_agent/prompts.py` was not modified.
+
+## Runs
+
+| Run | Sample(s) | Observation | Steps | Depth | Flow | Result | Duration |
+| --- | --- | ---: | ---: | ---: | --- | --- | ---: |
+| A0 | 650 | 200,000 | 24 | 1 | adaptive_flat | cancelled, no result | 57.8 min |
+| A1 | 650, 651 | 200,000 | 40 | 1 | adaptive_flat | 0/2 correct; 651 timeout | 33.7/60.7 min |
+| B | 650 | 50,000 | 40 | 1 | paged_flat | 0/1 correct | 17.8 min |
+| C1 | 650 | 200,000 | 40 | 2 | hierarchical | 0/1; no depth 2 | 18.8 min |
+| C2 | 650 | 200,000 | 40 | 2 | hierarchical v2 | 1/1 correct; depth 2 real | 41.6 min |
+
+The two A1 samples use the same full context but different questions. Source 650
+asks for the least common label (`ham`); source 651 asks for the number of ham
+rows (`8638`). Both are unfiltered and have 17,469 semantic rows.
+
+A0 command (cancelled after no output was produced):
 
 ```bash
 python -u -m examples.run_oolong_synth \
@@ -61,18 +80,94 @@ python -u -m examples.run_oolong_synth \
   --output-dir outputs/oolong_synth/deepseek_v4_flash_1m_full_semantic_large_obs_20260718
 ```
 
-Run B uses the same command and sample, with
-`--max-observation-chars 50000` and its own output directory.
+A1 command:
 
-Run C uses the same command and sample, with `--max-depth 2`, the 200,000
-observation limit, the recursive prompt flow, and its own output directory.
+```bash
+python -u -m examples.run_oolong_synth \
+  --config configs/model_api.local.yaml \
+  --sample-count 100 \
+  --min-context-len 1048576 --max-context-len 1048576 \
+  --start-index 0 --count 2 \
+  --episode-workers 2 \
+  --agent-max-steps 40 \
+  --max-depth 1 \
+  --max-concurrent-subagents 16 \
+  --max-run-seconds 3600 \
+  --max-observation-chars 200000 \
+  --prompt-flow adaptive_flat \
+  --request-timeout 600 \
+  --temperature 0 --max-tokens 4096 \
+  --bootstrap-samples 1000 \
+  --output-dir outputs/oolong_synth/deepseek_v4_flash_1m_full_semantic_adaptive_flat_two_parallel_steps40_children16_20260718
+```
+
+The A1 source 650 row submitted `Label: spam` in 2,019.7 seconds (gold
+`Label: ham`), with root 9 steps, 26 top-level children, 477 calls, and
+18,632,708 input tokens. Source 651 timed out after 3,641.6 seconds.
+
+B command:
+
+```bash
+python -u -m examples.run_oolong_synth \
+  --config configs/model_api.local.yaml \
+  --sample-count 100 \
+  --min-context-len 1048576 --max-context-len 1048576 \
+  --start-index 0 --count 1 \
+  --episode-workers 1 \
+  --agent-max-steps 40 \
+  --max-depth 1 \
+  --max-concurrent-subagents 16 \
+  --max-run-seconds 3600 \
+  --max-observation-chars 50000 \
+  --prompt-flow paged_flat \
+  --request-timeout 600 \
+  --temperature 0 --max-tokens 4096 \
+  --bootstrap-samples 1000 \
+  --output-dir outputs/oolong_synth/deepseek_v4_flash_1m_full_semantic_paged_flat_50k_steps40_children16_20260718
+```
+
+B ended in 1,066.2 seconds with a forced-final root answer and score 0. It
+used 78 calls and 7 children; 4 children completed, 2 were rejected by content
+inspection, and 1 hit quota.
+
+C1 initially completed in 1,128.3 seconds but produced no depth-2 agents: its
+four depth-1 workers were given malformed contexts and the root fell back to a
+regex classifier. It scored 0 and is retained as a failed prompt iteration.
+
+C2 command:
+
+```bash
+python -u -m examples.run_oolong_synth \
+  --config configs/model_api.local.yaml \
+  --sample-count 100 \
+  --min-context-len 1048576 --max-context-len 1048576 \
+  --start-index 0 --count 1 \
+  --episode-workers 1 \
+  --agent-max-steps 40 \
+  --max-depth 2 \
+  --max-concurrent-subagents 16 \
+  --max-run-seconds 3600 \
+  --max-observation-chars 200000 \
+  --prompt-flow hierarchical \
+  --request-timeout 600 \
+  --temperature 0 --max-tokens 4096 \
+  --bootstrap-samples 1000 \
+  --output-dir outputs/oolong_synth/deepseek_v4_flash_1m_full_semantic_hierarchical_v2_200k_depth2_steps40_children16_20260718
+```
+
+C2 submitted `Label: ham` correctly in 2,494.2 seconds. The trace contains
+one root, four completed depth-1 coarse workers, and 33 depth-2 leaf attempts
+(19 completed, 5 forced-final, 9 API errors: 8 content-inspection and 1
+quota). The root used 7 steps and 719 calls. Despite incomplete leaf coverage,
+the model returned the correct global label; the score was 1.0.
 
 ## Evidence To Capture
 
-For every run record: submitted answer, score, duration, status/error, total
-model calls and tokens, root steps, child counts by depth, chunk coverage, and
-any truncated observations. Keep generated manifests, exact prompt snapshots,
-JSONL traces, and summaries in the named output directory.
+For every run, generated manifests, prompt snapshots, JSONL traces, and
+summaries remain in the named output directory. The experiments show that
+larger observation and more root steps do not by themselves improve semantic
+accuracy. The hierarchical flow is the only tested flow that both produced a
+real depth-2 tree and returned a correct answer on the full 1M sample.
 
 ## Code Boundary
 

@@ -12,6 +12,8 @@ from recursive_agent.envs.oolong_synth import (
     DEFAULT_SYNTH_AGENT_PROMPT,
     OolongSynthDataset,
     OolongSynthEnvironment,
+    PROMPT_FLOWS,
+    build_flow_prompt,
     evaluate_synth_response,
     parse_synth_response,
     select_protocol_indices,
@@ -153,6 +155,23 @@ class OolongSynthEnvironmentTests(unittest.TestCase):
         for block in blocks:
             ast.parse(block.split("```", 1)[0])
         self.assertIn("oolong_synth", available_environments())
+
+    def test_prompt_flow_switch_preserves_default_and_selects_variants(self) -> None:
+        self.assertEqual(PROMPT_FLOWS, ("adaptive_flat", "paged_flat", "hierarchical"))
+        self.assertEqual(build_flow_prompt("adaptive_flat"), DEFAULT_SYNTH_AGENT_PROMPT)
+        self.assertNotEqual(
+            build_flow_prompt("paged_flat"), DEFAULT_SYNTH_AGENT_PROMPT
+        )
+        self.assertNotEqual(
+            build_flow_prompt("hierarchical"), DEFAULT_SYNTH_AGENT_PROMPT
+        )
+        environment = OolongSynthEnvironment(
+            samples=[sample_row()], prompt_flow="hierarchical"
+        )
+        self.assertEqual(environment.context["prompt_flow"], "hierarchical")
+        self.assertIn("can_delegate", environment.context["child_task_template"])
+        with self.assertRaises(ValueError):
+            OolongSynthEnvironment(samples=[sample_row()], prompt_flow="unknown")
 
 
 if __name__ == "__main__":

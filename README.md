@@ -250,6 +250,11 @@ coverage-checked JSON reports, and only the root submits the final answer.
 `--data-path` accepts a JSON/JSONL file, one parquet file, or a downloaded
 dataset directory containing `data/validation-*.parquet`.
 
+The environment prompt flow is selectable without changing the generic root
+prompt: `--prompt-flow adaptive_flat` keeps the original adaptive flow,
+`paged_flat` emphasizes bounded worker pages, and `hierarchical` permits a
+coarse worker to recurse into leaf workers when `--max-depth 2` is enabled.
+
 Inspect every prompt layer without loading data or calling a model:
 
 ```bash

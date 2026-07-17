@@ -41,6 +41,12 @@ def main() -> None:
     parser.add_argument("--max-concurrent-subagents", type=int, default=16)
     parser.add_argument("--max-run-seconds", type=float, default=3600)
     parser.add_argument("--max-observation-chars", type=int, default=12000)
+    parser.add_argument(
+        "--prompt-flow",
+        choices=("adaptive_flat", "paged_flat", "hierarchical"),
+        default="adaptive_flat",
+        help="select the Oolong-Synth environment prompt flow",
+    )
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--max-tokens", type=int, default=4096)
     parser.add_argument("--request-timeout", type=float, default=300.0)
@@ -132,6 +138,7 @@ def _run_one(args: argparse.Namespace, position: int, row: dict[str, Any]) -> di
             environment_kwargs={
                 "samples": [row],
                 "instance_id": 0,
+                "prompt_flow": args.prompt_flow,
             },
             agent_kwargs={
                 "max_steps": args.agent_max_steps,
@@ -337,6 +344,7 @@ def _build_manifest(
         "max_tokens": args.max_tokens,
         "max_depth": args.max_depth,
         "max_concurrent_subagents": args.max_concurrent_subagents,
+        "prompt_flow": args.prompt_flow,
         "bootstrap_samples": args.bootstrap_samples,
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
@@ -347,7 +355,7 @@ def _build_prompt_preview(args: argparse.Namespace, row: dict[str, Any]) -> dict
     from recursive_agent.prompts import FORCED_FINAL_USER, build_initial_user, build_system_prompt
     from recursive_agent.tools import format_tools_for_prompt, parse_tools
 
-    environment = OolongSynthEnvironment(samples=[row])
+    environment = OolongSynthEnvironment(samples=[row], prompt_flow=args.prompt_flow)
     formatted_tools = format_tools_for_prompt(parse_tools(environment.tools()))
     return {
         "root_system_prompt": build_system_prompt(
