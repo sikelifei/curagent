@@ -131,6 +131,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-search-calls", type=int, default=20)
     parser.add_argument("--max-recursion-depth", type=int, default=2)
     parser.add_argument("--max-concurrent-subagents", type=int, default=4)
+    parser.add_argument("--max-subagents-per-agent", type=int, default=4)
     parser.add_argument("--agent-max-steps", type=int, default=20)
     parser.add_argument("--max-run-seconds", type=float, default=1800.0)
     parser.add_argument("--max-observation-chars", type=int, default=16000)
@@ -158,6 +159,7 @@ def _validate_args(
         "max-search-calls": args.max_search_calls,
         "max-recursion-depth": args.max_recursion_depth,
         "max-concurrent-subagents": args.max_concurrent_subagents,
+        "max-subagents-per-agent": args.max_subagents_per_agent,
         "agent-max-steps": args.agent_max_steps,
         "max-run-seconds": args.max_run_seconds,
         "max-observation-chars": args.max_observation_chars,
@@ -198,6 +200,7 @@ def _run_and_persist(
                 "max_steps": args.agent_max_steps,
                 "max_depth": args.max_recursion_depth,
                 "max_concurrent_subagents": args.max_concurrent_subagents,
+                "max_subagents_per_agent": args.max_subagents_per_agent,
                 "max_run_seconds": args.max_run_seconds,
                 "max_observation_chars": args.max_observation_chars,
             },
@@ -584,6 +587,7 @@ def _run_metadata(
         "snippet_max_tokens": 512,
         "max_search_calls": args.max_search_calls,
         "max_recursion_depth": args.max_recursion_depth,
+        "max_subagents_per_agent": args.max_subagents_per_agent,
         "generation": generation,
     }
 

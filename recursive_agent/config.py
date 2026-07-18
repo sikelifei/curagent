@@ -42,6 +42,7 @@ class AgentConfig:
     max_steps: int = 20
     max_depth: int = 4
     max_concurrent_subagents: int = 4
+    max_subagents_per_agent: int | None = None
     max_run_seconds: float | None = None
     max_observation_chars: int | None = 8000
 
@@ -60,6 +61,13 @@ class AgentConfig:
             or self.max_concurrent_subagents <= 0
         ):
             raise ConfigurationError("max_concurrent_subagents must be a positive integer")
+        if self.max_subagents_per_agent is not None and (
+            not isinstance(self.max_subagents_per_agent, int)
+            or self.max_subagents_per_agent <= 0
+        ):
+            raise ConfigurationError(
+                "max_subagents_per_agent must be a positive integer or None"
+            )
         if self.max_run_seconds is not None and self.max_run_seconds <= 0:
             raise ConfigurationError("max_run_seconds must be positive when provided")
         if self.max_observation_chars is not None and (

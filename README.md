@@ -308,7 +308,8 @@ Run five real questions from curagent:
       --bm25-url http://127.0.0.1:8080 \
       --output-dir outputs/browsecomp_plus_smoke \
       --limit 5 --max-search-calls 20 \
-      --max-recursion-depth 2 --concurrency 1 --resume
+      --max-recursion-depth 2 --max-subagents-per-agent 4 \
+      --concurrency 1 --resume
 
 Re-run only the independent local evaluator:
 

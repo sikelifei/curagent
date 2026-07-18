@@ -22,6 +22,7 @@ Root role:
 - Understand the complete question and identify independent evidence tasks.
 - Delegate only clear, narrow tasks when separate investigations are useful.
   Do not force delegation for a question that direct search can solve reliably.
+- Start at most four direct workers across the entire root episode.
 - The root may search too. Integrate child findings, cross-check candidates,
   and resolve conflicts before answering.
 - A child context should contain browsecomp_role="worker" and a focused
@@ -41,8 +42,9 @@ Explanation: brief explanation with citations such as [12345]
 Exact Answer: the shortest unambiguous answer
 Confidence: 0-100%
 
-Do not read benchmark files from the REPL. The question in the private context
-and search results are the only benchmark information available for solving."""
+File access and imports are disabled in this environment. The question in the
+private context and search results are the only benchmark information available
+for solving."""
 
 DEFAULT_BROWSECOMP_TASK_TEMPLATE = """Answer this evidence-seeking question
 using the fixed BrowseComp-Plus BM25 corpus.

@@ -34,19 +34,27 @@ def main() -> None:
     output_dir = Path(args.output_dir).expanduser().resolve()
     runs_dir = output_dir / "runs" if (output_dir / "runs").is_dir() else output_dir
     paths = sorted(runs_dir.glob("run_*.json"))
-    records: list[tuple[Path, dict[str, Any]]] = []
+    all_records: list[tuple[Path, dict[str, Any]]] = []
     for path in paths:
         try:
             with path.open(encoding="utf-8") as handle:
                 record = json.load(handle)
         except (json.JSONDecodeError, OSError):
             continue
-        if record.get("status") == "completed":
-            records.append((path, record))
+        all_records.append((path, record))
+    records = [
+        (path, record)
+        for path, record in all_records
+        if record.get("status") == "completed"
+    ]
 
-    answers = load_gold_answers(
-        args.gold_data,
-        query_ids=(str(record["query_id"]) for _, record in records),
+    answers = (
+        load_gold_answers(
+            args.gold_data,
+            query_ids=(str(record["query_id"]) for _, record in records),
+        )
+        if records
+        else {}
     )
     started = time.time()
     for path, record in records:
@@ -85,12 +93,12 @@ def main() -> None:
         )
 
     refreshed = []
-    for path, _ in records:
+    for path, _ in all_records:
         with path.open(encoding="utf-8") as handle:
             refreshed.append(json.load(handle))
     summary = build_summary(
         refreshed,
-        requested=len(refreshed),
+        requested=len(all_records),
         elapsed_seconds=time.time() - started,
     )
     summary_path = output_dir / "summary.json" if (output_dir / "runs").is_dir() else output_dir.parent / "summary.json"

@@ -52,7 +52,12 @@ def run_environment(
 ) -> EnvironmentRunResult:
     """Run and close one initialized environment episode."""
     kwargs = dict(agent_kwargs or {})
-    conflicts = {"tools", "termination_check", "prompt_addendum"} & set(kwargs)
+    conflicts = {
+        "tools",
+        "termination_check",
+        "prompt_addendum",
+        "disabled_repl_builtins",
+    } & set(kwargs)
     if conflicts:
         raise ValueError(
             f"Environment runner owns these agent arguments: {sorted(conflicts)}"
@@ -69,6 +74,7 @@ def run_environment(
             tools=tools,
             termination_check=environment.status,
             prompt_addendum=environment.agent_prompt,
+            disabled_repl_builtins=environment.disabled_repl_builtins,
             **kwargs,
         )
         result = agent.run(task=task_prompt, context=initial_context)

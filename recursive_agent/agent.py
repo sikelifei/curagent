@@ -108,10 +108,12 @@ class RecursiveAgent:
         max_steps: int = 20,
         max_depth: int = 4,
         max_concurrent_subagents: int = 4,
+        max_subagents_per_agent: int | None = None,
         max_run_seconds: float | None = None,
         max_observation_chars: int | None = 8000,
         termination_check: TerminationCheck | None = None,
         prompt_addendum: str | None = None,
+        disabled_repl_builtins: frozenset[str] | set[str] | None = None,
         client_factory: ClientFactory | None = None,
     ) -> None:
         self.config = AgentConfig(
@@ -120,6 +122,7 @@ class RecursiveAgent:
             max_steps=max_steps,
             max_depth=max_depth,
             max_concurrent_subagents=max_concurrent_subagents,
+            max_subagents_per_agent=max_subagents_per_agent,
             max_run_seconds=max_run_seconds,
             max_observation_chars=max_observation_chars,
         )
@@ -132,6 +135,7 @@ class RecursiveAgent:
             prompt_addendum=self._prompt_addendum,
         )
         self._termination_check = termination_check
+        self._disabled_repl_builtins = frozenset(disabled_repl_builtins or ())
         self._client_factory = client_factory or clients.get_client
         self._active_lock = threading.Lock()
         self._active_runs: dict[str, _RunContext] = {}
@@ -221,8 +225,25 @@ class RecursiveAgent:
         ]
         latest_response: str | None = None
         local_usage = _UsageAccumulator()
+        direct_children_spawned = 0
+
+        def reserve_child_slots(requested: int) -> int:
+            nonlocal direct_children_spawned
+            limit = self.config.max_subagents_per_agent
+            if limit is None:
+                direct_children_spawned += requested
+                return requested
+            allowed = min(requested, max(0, limit - direct_children_spawned))
+            direct_children_spawned += allowed
+            return allowed
 
         def spawn_one(child_task: str, child_context: Any | None = None) -> str:
+            self._validate_task(child_task)
+            if depth < self.config.max_depth and reserve_child_slots(1) == 0:
+                return (
+                    "Error: maximum direct subagents per agent "
+                    f"({self.config.max_subagents_per_agent}) reached"
+                )
             return self._spawn_child(
                 task=child_task,
                 context=child_context,
@@ -232,18 +253,33 @@ class RecursiveAgent:
             )
 
         def spawn_many(requests: list[dict[str, Any]]) -> list[str]:
-            return self._spawn_children(
-                requests=requests,
+            normalized = self._validate_requests(requests)
+            if depth >= self.config.max_depth:
+                return self._spawn_children(
+                    requests=normalized,
+                    depth=depth,
+                    parent_trace=trace,
+                    run_context=run_context,
+                )
+            allowed = reserve_child_slots(len(normalized))
+            results = self._spawn_children(
+                requests=normalized[:allowed],
                 depth=depth,
                 parent_trace=trace,
                 run_context=run_context,
             )
+            error = (
+                "Error: maximum direct subagents per agent "
+                f"({self.config.max_subagents_per_agent}) reached"
+            )
+            return results + [error] * (len(normalized) - allowed)
 
         repl = ReplSession(
             context=context,
             tools=self._tool_values,
             spawn_subagent=spawn_one,
             spawn_subagents=spawn_many,
+            disabled_builtins=self._disabled_repl_builtins,
         )
 
         try:

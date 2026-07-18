@@ -40,6 +40,7 @@ Run the smoke test from the curagent checkout:
       --limit 5 \
       --max-search-calls 20 \
       --max-recursion-depth 2 \
+      --max-subagents-per-agent 4 \
       --concurrency 1
 
 The runner invokes the local evaluator separately after each agent run. It can

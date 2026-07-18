@@ -32,6 +32,11 @@ class AgentEnvironment(ABC):
         """Return environment guidance shared by root and delegated agents."""
         return ""
 
+    @property
+    def disabled_repl_builtins(self) -> frozenset[str]:
+        """Return REPL built-ins unavailable to every agent in this episode."""
+        return frozenset()
+
     @abstractmethod
     def status(self) -> EnvironmentStatus:
         """Return the current environment termination state."""

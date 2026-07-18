@@ -67,6 +67,11 @@ class BrowseCompPlusEnvironment(AgentEnvironment):
         return self._agent_prompt
 
     @property
+    def disabled_repl_builtins(self) -> frozenset[str]:
+        # The search tool is the only benchmark data access path for this env.
+        return frozenset({"__import__", "open"})
+
+    @property
     def context(self) -> dict[str, str]:
         return dict(self._context)
 

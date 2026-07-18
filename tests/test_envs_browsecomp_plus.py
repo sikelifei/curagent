@@ -10,7 +10,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from recursive_agent import RecursiveAgent
+from recursive_agent import ConfigurationError, RecursiveAgent
 from recursive_agent.envs import available_environments
 from recursive_agent.envs.browsecomp_plus import (
     BrowseCompPlusEnvironment,
@@ -28,7 +28,9 @@ from recursive_agent.envs.browsecomp_plus.runner import (
     _write_json,
     analyze_recursive_trace,
 )
+from recursive_agent.envs.browsecomp_plus.evaluator import main as evaluator_main
 from recursive_agent.envs.browsecomp_plus.tools import _tool_result_payload
+from recursive_agent.repl import ReplSession
 from recursive_agent.types import ModelCallUsage, ModelResponse
 
 
@@ -86,10 +88,34 @@ class BrowseCompPlusEnvironmentTests(unittest.TestCase):
             {"browsecomp_role", "environment", "query_id", "query"},
         )
         self.assertEqual(set(environment.tools()), {"search"})
+        self.assertEqual(
+            environment.disabled_repl_builtins,
+            frozenset({"__import__", "open"}),
+        )
         serialized = json.dumps(environment.context)
         for forbidden in ("answer", "gold", "evidence", "qrel", "judge"):
             self.assertNotIn(forbidden, serialized.lower())
         self.assertIn("browsecomp_plus", available_environments())
+
+    def test_browsecomp_repl_cannot_open_files_or_import_modules(self) -> None:
+        environment = BrowseCompPlusEnvironment(
+            sample=BrowseCompQuery("locked", "Question"),
+            search_client=StubSearchClient(),
+        )
+        repl = ReplSession(
+            context=environment.context,
+            tools={
+                name: entry["tool"]
+                for name, entry in environment.tools().items()
+            },
+            spawn_subagent=lambda task, context=None: "",
+            spawn_subagents=lambda requests: [],
+            disabled_builtins=environment.disabled_repl_builtins,
+        )
+        opened = repl.execute("print(open('/tmp/not-allowed'))")
+        imported = repl.execute("print(__import__('os'))")
+        self.assertIn("NameError", opened.trace.error)
+        self.assertIn("NameError", imported.trace.error)
 
     def test_parallel_callers_share_budget_and_retrieved_union(self) -> None:
         client = StubSearchClient()
@@ -117,7 +143,7 @@ class BrowseCompPlusEnvironmentTests(unittest.TestCase):
         with self.assertRaises(SearchBudgetExceeded):
             environment.search("one too many")
 
-    def test_real_recursive_runtime_shares_search_and_honors_depth(self) -> None:
+    def test_scripted_runtime_shares_search_and_honors_depth(self) -> None:
         environment = BrowseCompPlusEnvironment(
             sample=BrowseCompQuery("q3", "Question with independent clues"),
             max_search_calls=2,
@@ -174,6 +200,7 @@ class BrowseCompPlusEnvironmentTests(unittest.TestCase):
             backend_kwargs={"model_name": "unused"},
             tools=environment.tools(),
             prompt_addendum=environment.agent_prompt,
+            disabled_repl_builtins=environment.disabled_repl_builtins,
             max_depth=1,
             max_steps=3,
             client_factory=lambda backend, kwargs: ScriptedClient(),
@@ -185,6 +212,49 @@ class BrowseCompPlusEnvironmentTests(unittest.TestCase):
         self.assertEqual(stats["max_depth_reached"], 1)
         self.assertTrue(stats["root_used_search"])
         self.assertTrue(stats["subagent_used_search"])
+        self.assertIn("at most four direct workers", environment.agent_prompt)
+
+    def test_runtime_caps_total_direct_subagents_per_agent(self) -> None:
+        from tests.fakes import FakeFactory, initial_task
+
+        def handler(messages, timeout):
+            task = initial_task(messages)
+            fence = chr(96) * 3
+            if task == "root":
+                return (
+                    f"{fence}repl\n"
+                    "results = spawn_subagents(["
+                    "{'task': 'child-1'}, {'task': 'child-2'}, "
+                    "{'task': 'child-3'}, {'task': 'child-4'}])\n"
+                    "answer['content'] = str(results)\n"
+                    "answer['ready'] = True\n"
+                    f"{fence}"
+                )
+            return (
+                f"{fence}repl\n"
+                f"answer['content'] = '{task}'\n"
+                "answer['ready'] = True\n"
+                f"{fence}"
+            )
+
+        result = RecursiveAgent(
+            backend_kwargs={"model_name": "fake"},
+            max_depth=1,
+            max_subagents_per_agent=2,
+            client_factory=FakeFactory(handler),
+        ).run("root")
+        self.assertEqual(len(result.trace.children), 2)
+        self.assertIn("child-1", result.answer)
+        self.assertIn("child-2", result.answer)
+        self.assertEqual(
+            result.answer.count("maximum direct subagents per agent (2) reached"),
+            2,
+        )
+        with self.assertRaises(ConfigurationError):
+            RecursiveAgent(
+                backend_kwargs={"model_name": "fake"},
+                max_subagents_per_agent=0,
+            )
 
     def test_final_output_parser_is_strict(self) -> None:
         parsed = parse_final_output(
@@ -323,6 +393,76 @@ class BrowseCompPlusEnvironmentTests(unittest.TestCase):
         self.assertEqual(record["result"][-1]["type"], "output_text")
         self.assertEqual(record["result"][-1]["output"], record["final_answer"])
 
+    def test_standalone_evaluator_summary_preserves_failed_questions(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runs = root / "runs"
+            runs.mkdir()
+            _write_json(
+                runs / "run_completed.json",
+                {
+                    "query_id": "completed",
+                    "query": "Who?",
+                    "status": "completed",
+                    "final_answer": "Exact Answer: Ada",
+                    "search_calls": 1,
+                    "subagent_count": 0,
+                    "max_depth_reached": 0,
+                    "retrieved_docids": [],
+                    "local_evaluator": None,
+                },
+            )
+            _write_json(
+                runs / "run_failed.json",
+                {
+                    "query_id": "failed",
+                    "query": "Who?",
+                    "status": "error",
+                    "final_answer": "",
+                    "search_calls": 0,
+                    "subagent_count": 0,
+                    "max_depth_reached": 0,
+                    "retrieved_docids": [],
+                    "local_evaluator": None,
+                },
+            )
+            fake_judge = SimpleNamespace(
+                to_dict=lambda: {
+                    "correct": True,
+                    "score": 1,
+                    "reason": "match",
+                    "response": "{}",
+                    "error": None,
+                    "model": "test",
+                    "attempts": 1,
+                }
+            )
+            argv = [
+                "evaluator",
+                "--output-dir",
+                str(root),
+                "--model-config",
+                "unused.yaml",
+            ]
+            with (
+                patch(
+                    "recursive_agent.envs.browsecomp_plus.evaluator.load_gold_answers",
+                    return_value={"completed": "Ada"},
+                ),
+                patch(
+                    "recursive_agent.envs.browsecomp_plus.evaluator.judge_answer",
+                    return_value=fake_judge,
+                ),
+                patch("sys.argv", argv),
+            ):
+                evaluator_main()
+            summary = json.loads(
+                (root / "summary.json").read_text(encoding="utf-8")
+            )
+        self.assertEqual(summary["total_questions"], 2)
+        self.assertEqual(summary["completed"], 1)
+        self.assertEqual(summary["failed"], 1)
+
 
 def _trace_mapping(trace):
     return {
@@ -352,6 +492,7 @@ def _args():
         bm25_url="http://127.0.0.1:8080/mcp",
         max_search_calls=20,
         max_recursion_depth=2,
+        max_subagents_per_agent=4,
         temperature=None,
         top_p=None,
         max_tokens=None,

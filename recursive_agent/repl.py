@@ -118,7 +118,17 @@ class ReplSession:
         tools: dict[str, Any],
         spawn_subagent: Callable[[str, Any | None], str],
         spawn_subagents: Callable[[list[dict[str, Any]]], list[str]],
+        disabled_builtins: frozenset[str] | set[str] | None = None,
     ) -> None:
+        disabled = frozenset(disabled_builtins or ())
+        unknown = disabled - ALLOWED_BUILTINS.keys()
+        if unknown:
+            raise ValueError(f"Unknown disabled REPL built-ins: {sorted(unknown)}")
+        self._allowed_builtins = {
+            name: value
+            for name, value in ALLOWED_BUILTINS.items()
+            if name not in disabled
+        }
         self._tools = tools
         self._context_fallback = context
         self._answer: dict[str, Any] = {"content": "", "ready": False}
@@ -128,7 +138,7 @@ class ReplSession:
             "spawn_subagents": spawn_subagents,
         }
         self.namespace: dict[str, Any] = {
-            "__builtins__": dict(ALLOWED_BUILTINS),
+            "__builtins__": dict(self._allowed_builtins),
             "__name__": "__main__",
             "context": context,
             "answer": self._answer,
@@ -219,7 +229,7 @@ class ReplSession:
             self._answer = {"content": "", "ready": False}
             self.namespace["answer"] = self._answer
 
-        self.namespace["__builtins__"] = dict(ALLOWED_BUILTINS)
+        self.namespace["__builtins__"] = dict(self._allowed_builtins)
         self.namespace["__name__"] = "__main__"
         self.namespace.pop("print", None)
         self.namespace.update(self._builtins)
