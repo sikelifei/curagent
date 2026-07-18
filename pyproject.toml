@@ -14,9 +14,10 @@ dependencies = [
 
 [project.optional-dependencies]
 anthropic = ["anthropic>=0.40"]
+browsecomp = ["fastmcp>=2.9,<4", "pyarrow>=14"]
 gemini = ["google-genai>=1.0"]
 oolong = ["datasets>=2.19"]
-all-providers = ["anthropic>=0.40", "google-genai>=1.0", "datasets>=2.19"]
+all-providers = ["anthropic>=0.40", "fastmcp>=2.9,<4", "google-genai>=1.0", "datasets>=2.19", "pyarrow>=14"]
 
 [tool.setuptools.packages.find]
 include = ["recursive_agent*"]

@@ -1,0 +1,364 @@
+from __future__ import annotations
+
+import argparse
+import json
+import tempfile
+import threading
+import unittest
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+
+from recursive_agent import RecursiveAgent
+from recursive_agent.envs import available_environments
+from recursive_agent.envs.browsecomp_plus import (
+    BrowseCompPlusEnvironment,
+    BrowseCompQuery,
+    SearchBudgetExceeded,
+    judge_answer,
+    normalize_search_results,
+    parse_final_output,
+    parse_judge_response,
+)
+from recursive_agent.envs.browsecomp_plus.runner import (
+    _completed_record,
+    _error_record,
+    _is_completed,
+    _write_json,
+    analyze_recursive_trace,
+)
+from recursive_agent.envs.browsecomp_plus.tools import _tool_result_payload
+from recursive_agent.types import ModelCallUsage, ModelResponse
+
+
+class StubSearchClient:
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self.calls: list[str] = []
+
+    def search(self, query: str):
+        with self._lock:
+            self.calls.append(query)
+            call_number = len(self.calls)
+        return [
+            {
+                "docid": call_number,
+                "score": call_number / 10,
+                "snippet": f"evidence for {query}",
+            }
+        ]
+
+
+class BrowseCompPlusEnvironmentTests(unittest.TestCase):
+    def test_bm25_payload_normalizes_docids_and_empty_results(self) -> None:
+        self.assertEqual(normalize_search_results([]), [])
+        self.assertEqual(
+            normalize_search_results(
+                {"result": [{"docid": 17, "score": None, "snippet": "text"}]}
+            ),
+            [{"docid": "17", "score": None, "snippet": "text"}],
+        )
+        self.assertEqual(
+            _tool_result_payload(
+                [SimpleNamespace(text='[{"docid": "9", "snippet": "x"}]')]
+            ),
+            [{"docid": "9", "snippet": "x"}],
+        )
+
+    def test_empty_search_result_does_not_crash_environment(self) -> None:
+        client = SimpleNamespace(search=lambda query: [])
+        environment = BrowseCompPlusEnvironment(
+            sample=BrowseCompQuery("empty", "Question"),
+            search_client=client,
+        )
+        self.assertEqual(environment.search("no matches"), [])
+        self.assertEqual(environment.report()["search_calls"], 1)
+        self.assertEqual(environment.report()["retrieved_docids"], [])
+
+    def test_agent_context_and_tools_cannot_access_gold_data(self) -> None:
+        environment = BrowseCompPlusEnvironment(
+            sample=BrowseCompQuery("q1", "Which entity matches both clues?"),
+            search_client=StubSearchClient(),
+        )
+        self.assertEqual(
+            set(environment.context),
+            {"browsecomp_role", "environment", "query_id", "query"},
+        )
+        self.assertEqual(set(environment.tools()), {"search"})
+        serialized = json.dumps(environment.context)
+        for forbidden in ("answer", "gold", "evidence", "qrel", "judge"):
+            self.assertNotIn(forbidden, serialized.lower())
+        self.assertIn("browsecomp_plus", available_environments())
+
+    def test_parallel_callers_share_budget_and_retrieved_union(self) -> None:
+        client = StubSearchClient()
+        environment = BrowseCompPlusEnvironment(
+            sample=BrowseCompQuery("q2", "Question"),
+            max_search_calls=2,
+            search_client=client,
+        )
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            futures = [
+                executor.submit(environment.search, f"query {index}")
+                for index in range(3)
+            ]
+        outcomes = []
+        for future in futures:
+            try:
+                outcomes.append(future.result())
+            except SearchBudgetExceeded:
+                outcomes.append("budget")
+        report = environment.report()
+        self.assertEqual(len(client.calls), 2)
+        self.assertEqual(report["search_calls"], 2)
+        self.assertEqual(report["retrieved_docids"], ["1", "2"])
+        self.assertEqual(sum(value == "budget" for value in outcomes), 1)
+        with self.assertRaises(SearchBudgetExceeded):
+            environment.search("one too many")
+
+    def test_real_recursive_runtime_shares_search_and_honors_depth(self) -> None:
+        environment = BrowseCompPlusEnvironment(
+            sample=BrowseCompQuery("q3", "Question with independent clues"),
+            max_search_calls=2,
+            search_client=StubSearchClient(),
+        )
+
+        class ScriptedClient:
+            def __init__(self) -> None:
+                self.calls = 0
+                self.model_name = "scripted-runtime-test"
+
+            def completion(self, messages, *, timeout=None):
+                self.calls += 1
+                delegated = str(messages[1]["content"]).startswith("Delegated task:")
+                fence = chr(96) * 3
+                if delegated:
+                    content = (
+                        f"{fence}repl\n"
+                        "blocked = spawn_subagent('too deep', {'browsecomp_role': 'worker'})\n"
+                        "found = search('child evidence')\n"
+                        "print(blocked, found)\n"
+                        "answer['content'] = 'Finding: child evidence [1]'\n"
+                        "answer['ready'] = True\n"
+                        f"{fence}"
+                    )
+                elif self.calls == 1:
+                    content = (
+                        f"{fence}repl\n"
+                        "reports = spawn_subagents([{'task': 'verify clue', "
+                        "'context': {'browsecomp_role': 'worker', "
+                        "'objective': 'verify clue'}}])\n"
+                        "print(reports)\n"
+                        f"{fence}"
+                    )
+                else:
+                    content = (
+                        f"{fence}repl\n"
+                        "found = search('root verification')\n"
+                        "print(found)\n"
+                        "answer['content'] = 'Explanation: verified [1]\\n"
+                        "Exact Answer: Example\\nConfidence: 80%'\n"
+                        "answer['ready'] = True\n"
+                        f"{fence}"
+                    )
+                return ModelResponse(
+                    content=content,
+                    usage=ModelCallUsage(model=self.model_name),
+                )
+
+            def close(self):
+                return None
+
+        agent = RecursiveAgent(
+            backend_kwargs={"model_name": "unused"},
+            tools=environment.tools(),
+            prompt_addendum=environment.agent_prompt,
+            max_depth=1,
+            max_steps=3,
+            client_factory=lambda backend, kwargs: ScriptedClient(),
+        )
+        result = agent.run(environment.task, environment.context)
+        stats = analyze_recursive_trace(_trace_mapping(result.trace))
+        self.assertEqual(environment.report()["search_calls"], 2)
+        self.assertEqual(stats["subagent_count"], 1)
+        self.assertEqual(stats["max_depth_reached"], 1)
+        self.assertTrue(stats["root_used_search"])
+        self.assertTrue(stats["subagent_used_search"])
+
+    def test_final_output_parser_is_strict(self) -> None:
+        parsed = parse_final_output(
+            "Explanation: supported by [12]\n"
+            "Exact Answer: Ada Lovelace\n"
+            "Confidence: 85%"
+        )
+        self.assertEqual(parsed["exact_answer"], "Ada Lovelace")
+        self.assertEqual(parsed["confidence"], 85.0)
+        self.assertIsNone(parse_final_output("Ada Lovelace"))
+        self.assertIsNone(
+            parse_final_output(
+                "Explanation: x\nExact Answer: y\nConfidence: 101%"
+            )
+        )
+
+    def test_judge_parser_requires_structured_json(self) -> None:
+        valid = parse_judge_response(
+            '{"correct": true, "score": 1, "reason": "equivalent"}',
+            model="judge",
+        )
+        invalid = parse_judge_response("correct: yes", model="judge")
+        self.assertTrue(valid.correct)
+        self.assertIsNone(valid.error)
+        self.assertIsNotNone(invalid.error)
+
+    def test_evaluator_retries_json_parse_failure(self) -> None:
+        responses = iter(
+            [
+                "not json",
+                '{"correct": true, "score": 1, "reason": "same entity"}',
+            ]
+        )
+
+        class FakeJudgeClient:
+            def __init__(self, **kwargs):
+                pass
+
+            def completion(self, messages, *, timeout=None):
+                return SimpleNamespace(content=next(responses))
+
+            def close(self):
+                pass
+
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "model.yaml"
+            config.write_text(
+                "model:\n  type: api\n  api:\n"
+                "    model: local-judge\n    api_key: test\n",
+                encoding="utf-8",
+            )
+            with patch(
+                "recursive_agent.envs.browsecomp_plus.scoring.OpenAIClient",
+                FakeJudgeClient,
+            ):
+                result = judge_answer(
+                    model_config=config,
+                    question="Who?",
+                    correct_answer="Ada",
+                    response="Exact Answer: Ada",
+                    max_attempts=2,
+                )
+        self.assertTrue(result.correct)
+        self.assertEqual(result.attempts, 2)
+
+    def test_failure_record_is_saved_and_resume_skips_only_completed(self) -> None:
+        args = _args()
+        sample = BrowseCompQuery("q/error", "Question")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            failed_path = root / "failed.json"
+            completed_path = root / "completed.json"
+            record = _error_record(
+                args=args,
+                sample=sample,
+                model_metadata={"model": "test"},
+                search_report={
+                    "search_calls": 1,
+                    "retrieved_docids": [9],
+                    "events": [],
+                },
+                duration_seconds=0.1,
+                error=RuntimeError("failure"),
+                trajectory_path=root / "trajectory.json",
+            )
+            _write_json(failed_path, record)
+            _write_json(completed_path, {"status": "completed"})
+            loaded = json.loads(failed_path.read_text(encoding="utf-8"))
+            failed_done = _is_completed(failed_path)
+            completed_done = _is_completed(completed_path)
+        self.assertEqual(loaded["status"], "error")
+        self.assertEqual(loaded["retrieved_docids"], ["9"])
+        self.assertFalse(failed_done)
+        self.assertTrue(completed_done)
+
+    def test_completed_record_is_directly_official_evaluator_compatible(self) -> None:
+        args = _args()
+        record = _completed_record(
+            args=args,
+            sample=BrowseCompQuery("official", "Question"),
+            output=(
+                "Explanation: evidence [9]\n"
+                "Exact Answer: Example\n"
+                "Confidence: 70%"
+            ),
+            model_metadata={"model": "test"},
+            search_report={
+                "search_calls": 1,
+                "retrieved_docids": [9],
+                "events": [
+                    {
+                        "query": "example",
+                        "results": [
+                            {"docid": "9", "score": 1.0, "snippet": "evidence"}
+                        ],
+                    }
+                ],
+            },
+            stats={
+                "subagent_count": 1,
+                "max_depth_reached": 1,
+                "root_used_search": True,
+                "subagent_used_search": True,
+                "recursion_chain": [],
+            },
+            trajectory_path=Path("/tmp/trajectory.json"),
+            duration_seconds=1.0,
+            agent_status="completed",
+            usage={},
+            local_judge=None,
+        )
+        self.assertEqual(record["status"], "completed")
+        self.assertEqual(record["retrieved_docids"], ["9"])
+        self.assertEqual(record["tool_call_counts"], {"search": 1, "recursive": 1})
+        self.assertTrue(record["result"])
+        self.assertEqual(record["result"][-1]["type"], "output_text")
+        self.assertEqual(record["result"][-1]["output"], record["final_answer"])
+
+
+def _trace_mapping(trace):
+    return {
+        "agent_id": trace.agent_id,
+        "parent_id": trace.parent_id,
+        "depth": trace.depth,
+        "task": trace.task,
+        "steps": [
+            {
+                "code_executions": [
+                    {"code": execution.code}
+                    for execution in step.code_executions
+                ]
+            }
+            for step in trace.steps
+        ],
+        "usage": trace.usage.to_dict(),
+        "answer": trace.answer,
+        "status": trace.status,
+        "children": [_trace_mapping(child) for child in trace.children],
+    }
+
+
+def _args():
+    return argparse.Namespace(
+        model_config="configs/model_api.local.yaml",
+        bm25_url="http://127.0.0.1:8080/mcp",
+        max_search_calls=20,
+        max_recursion_depth=2,
+        temperature=None,
+        top_p=None,
+        max_tokens=None,
+        request_timeout=None,
+        seed=None,
+    )
+
+
+if __name__ == "__main__":
+    unittest.main()

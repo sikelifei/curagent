@@ -281,3 +281,46 @@ zero, and reports the micro-average Oolong score, answer-type/context-length
 breakdowns, and a 10,000-resample bootstrap 95% confidence interval. This is a
 comparable curagent evaluation with its own deterministic sample manifest, not
 an exact reproduction of the paper's unpublished 199-row selection.
+
+### BrowseComp-Plus official BM25
+
+The browsecomp_plus environment passes only query_id and query to an agent and
+registers the official fixed-corpus search(query) MCP tool. Root and delegated
+agents share one thread-safe search budget and retrieved-docid set. Recursion
+counts and depth come from real child traces, while every retrieval query,
+Top-5 result, and full model/tool trajectory is persisted.
+
+Prepare the question-only TSV once if it is absent:
+
+    python -m recursive_agent.envs.browsecomp_plus.dataset --generate-queries
+
+Start the official CPU-only server from BrowseComp-Plus:
+
+    CUDA_VISIBLE_DEVICES="" python searcher/mcp_server.py \
+      --searcher-type bm25 --index-path indexes/bm25 \
+      --k 5 --snippet-max-tokens 512 --port 8080
+
+Run five real questions from curagent:
+
+    python -m recursive_agent.envs.browsecomp_plus.runner \
+      --queries /data2/zhangwenjian/agent/bench/BrowseComp-Plus/topics-qrels/queries.tsv \
+      --model-config configs/model_api.local.yaml \
+      --bm25-url http://127.0.0.1:8080 \
+      --output-dir outputs/browsecomp_plus_smoke \
+      --limit 5 --max-search-calls 20 \
+      --max-recursion-depth 2 --concurrency 1 --resume
+
+Re-run only the independent local evaluator:
+
+    python -m recursive_agent.envs.browsecomp_plus.evaluator \
+      --output-dir outputs/browsecomp_plus_smoke \
+      --model-config configs/model_api.local.yaml --force
+
+The run JSON files in outputs/browsecomp_plus_smoke/runs already match the
+fields consumed by BrowseComp-Plus scripts_evaluation/evaluate_run.py. For a
+later full run, use --limit 830 --resume; do not use the smoke evaluator score
+as a leaderboard score.
+
+本地模型 evaluator 的结果不能直接作为 BrowseComp-Plus 官方榜单结果。
+正式全量评测和提交时，应使用 BrowseComp-Plus 官方 evaluation script
+及其规定的 judge 模型和版本。
