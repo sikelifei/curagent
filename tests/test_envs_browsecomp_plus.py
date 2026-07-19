@@ -212,7 +212,16 @@ class BrowseCompPlusEnvironmentTests(unittest.TestCase):
         self.assertEqual(stats["max_depth_reached"], 1)
         self.assertTrue(stats["root_used_search"])
         self.assertTrue(stats["subagent_used_search"])
-        self.assertIn("at most four direct workers", environment.agent_prompt)
+        self.assertIn(
+            "whether to recurse, when to recurse",
+            environment.agent_prompt,
+        )
+        self.assertIn(
+            "prompt imposes no additional numeric cap",
+            environment.agent_prompt,
+        )
+        self.assertNotIn("exactly two", environment.agent_prompt)
+        self.assertNotIn("at most four direct workers", environment.agent_prompt)
 
     def test_runtime_caps_total_direct_subagents_per_agent(self) -> None:
         from tests.fakes import FakeFactory, initial_task
