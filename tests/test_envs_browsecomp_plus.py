@@ -339,6 +339,13 @@ class BrowseCompPlusEnvironmentTests(unittest.TestCase):
                 duration_seconds=0.1,
                 error=RuntimeError("failure"),
                 trajectory_path=root / "trajectory.json",
+                stats={
+                    "subagent_count": 1,
+                    "max_depth_reached": 1,
+                    "root_used_search": True,
+                    "subagent_used_search": True,
+                    "recursion_chain": [{"agent_id": "root"}],
+                },
             )
             _write_json(failed_path, record)
             _write_json(completed_path, {"status": "completed"})
@@ -347,6 +354,11 @@ class BrowseCompPlusEnvironmentTests(unittest.TestCase):
             completed_done = _is_completed(completed_path)
         self.assertEqual(loaded["status"], "error")
         self.assertEqual(loaded["retrieved_docids"], ["9"])
+        self.assertEqual(loaded["subagent_count"], 1)
+        self.assertEqual(
+            loaded["trajectory"]["recursion_chain"],
+            [{"agent_id": "root"}],
+        )
         self.assertFalse(failed_done)
         self.assertTrue(completed_done)
 

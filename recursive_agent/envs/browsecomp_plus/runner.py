@@ -192,6 +192,13 @@ def _run_and_persist(
         max_search_calls=args.max_search_calls,
         bm25_timeout=args.bm25_timeout,
     )
+    stats = {
+        "subagent_count": 0,
+        "max_depth_reached": 0,
+        "root_used_search": False,
+        "subagent_used_search": False,
+        "recursion_chain": [],
+    }
     try:
         run = run_environment(
             environment,
@@ -207,14 +214,16 @@ def _run_and_persist(
             model_overrides=_model_overrides(args),
         )
         output = str(run.agent_result.answer or "").strip()
-        if not output:
-            raise ValueError("Agent completed without a final output")
         full_trace = run.to_trace_dict()
         stats = analyze_recursive_trace(
             (full_trace.get("agent_result") or {}).get("trace")
         )
         search_report = run.environment_report
         _write_json(trajectory_path, full_trace)
+        if not output:
+            raise ValueError("Agent completed without a final output")
+        if parse_final_output(output) is None:
+            raise ValueError("Agent final output does not match the required format")
         local_judge = None
         if not args.skip_local_evaluator:
             if gold_answer is None:
@@ -266,6 +275,7 @@ def _run_and_persist(
             duration_seconds=time.time() - started,
             error=exc,
             trajectory_path=trajectory_path,
+            stats=stats,
         )
     _write_json(run_path, record)
     parsed = parse_final_output(record.get("final_answer", ""))
@@ -353,9 +363,17 @@ def _error_record(
     duration_seconds: float,
     error: Exception,
     trajectory_path: Path,
+    stats: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     status = "timeout" if isinstance(error, TimeoutExceededError) else "error"
     search_calls = int(search_report.get("search_calls", 0))
+    recursion = stats or {
+        "subagent_count": 0,
+        "max_depth_reached": 0,
+        "root_used_search": search_calls > 0,
+        "subagent_used_search": False,
+        "recursion_chain": [],
+    }
     return {
         "metadata": _run_metadata(args, model_metadata),
         "query_id": sample.query_id,
@@ -366,21 +384,24 @@ def _error_record(
         "retrieved_docids": [
             str(value) for value in search_report.get("retrieved_docids", [])
         ],
-        "tool_call_counts": {"search": search_calls, "recursive": 0},
-        "recursive_calls": 0,
-        "max_depth_reached": 0,
-        "subagent_count": 0,
+        "tool_call_counts": {
+            "search": search_calls,
+            "recursive": int(recursion["subagent_count"]),
+        },
+        "recursive_calls": int(recursion["subagent_count"]),
+        "max_depth_reached": int(recursion["max_depth_reached"]),
+        "subagent_count": int(recursion["subagent_count"]),
         "trajectory": {
             "path": str(trajectory_path),
-            "recursion_chain": [],
+            "recursion_chain": recursion["recursion_chain"],
             "search_events": search_report.get("events", []),
         },
         "result": [{"type": "output_text", "output": ""}],
         "debug": {
-            "subagent_count": 0,
-            "max_depth_reached": 0,
-            "root_used_search": search_calls > 0,
-            "subagent_used_search": False,
+            "subagent_count": int(recursion["subagent_count"]),
+            "max_depth_reached": int(recursion["max_depth_reached"]),
+            "root_used_search": bool(recursion["root_used_search"]),
+            "subagent_used_search": bool(recursion["subagent_used_search"]),
             "trajectory_path": str(trajectory_path),
             "duration_seconds": duration_seconds,
             "output_format_valid": False,
