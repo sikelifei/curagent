@@ -82,7 +82,9 @@ judge:
       --skip-local-evaluator
 
 From the BrowseComp-Plus checkout, pass the generated `runs` directory directly
-to the official evaluator:
+to the official evaluator. Its required decrypted ground-truth JSONL is not
+shipped in the current checkout; first provide it at the path passed to
+`--ground_truth` using the official data preparation process:
 
     python scripts_evaluation/evaluate_run.py \
       --input_dir /data2/zhangwenjian/agent/curagent/outputs/browsecomp_plus_full/runs \
