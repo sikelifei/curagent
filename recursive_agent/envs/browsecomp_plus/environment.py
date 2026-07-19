@@ -52,7 +52,6 @@ class BrowseCompPlusEnvironment(AgentEnvironment):
         self._tools = build_browsecomp_tools(self)
         self._closed = False
         self._context = {
-            "browsecomp_role": "root",
             "environment": self.name,
             "query_id": sample.query_id,
             "query": sample.query,

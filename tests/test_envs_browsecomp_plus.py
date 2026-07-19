@@ -85,7 +85,7 @@ class BrowseCompPlusEnvironmentTests(unittest.TestCase):
         )
         self.assertEqual(
             set(environment.context),
-            {"browsecomp_role", "environment", "query_id", "query"},
+            {"environment", "query_id", "query"},
         )
         self.assertEqual(set(environment.tools()), {"search"})
         self.assertEqual(
@@ -162,7 +162,7 @@ class BrowseCompPlusEnvironmentTests(unittest.TestCase):
                 if delegated:
                     content = (
                         f"{fence}repl\n"
-                        "blocked = spawn_subagent('too deep', {'browsecomp_role': 'worker'})\n"
+                        "blocked = spawn_subagent('too deep', {'objective': 'nested'})\n"
                         "found = search('child evidence')\n"
                         "print(blocked, found)\n"
                         "answer['content'] = 'Finding: child evidence [1]'\n"
@@ -173,8 +173,7 @@ class BrowseCompPlusEnvironmentTests(unittest.TestCase):
                     content = (
                         f"{fence}repl\n"
                         "reports = spawn_subagents([{'task': 'verify clue', "
-                        "'context': {'browsecomp_role': 'worker', "
-                        "'objective': 'verify clue'}}])\n"
+                        "'context': {'objective': 'verify clue'}}])\n"
                         "print(reports)\n"
                         f"{fence}"
                     )
@@ -212,16 +211,10 @@ class BrowseCompPlusEnvironmentTests(unittest.TestCase):
         self.assertEqual(stats["max_depth_reached"], 1)
         self.assertTrue(stats["root_used_search"])
         self.assertTrue(stats["subagent_used_search"])
-        self.assertIn(
-            "whether to recurse, when to recurse",
-            environment.agent_prompt,
-        )
-        self.assertIn(
-            "prompt imposes no additional numeric cap",
-            environment.agent_prompt,
-        )
-        self.assertNotIn("exactly two", environment.agent_prompt)
-        self.assertNotIn("at most four direct workers", environment.agent_prompt)
+        self.assertIn("fixed BrowseComp-Plus corpus", environment.agent_prompt)
+        self.assertNotIn("worker", environment.agent_prompt.lower())
+        self.assertNotIn("spawn_subagent", environment.agent_prompt)
+        self.assertNotIn("recurse", environment.agent_prompt.lower())
 
     def test_runtime_caps_total_direct_subagents_per_agent(self) -> None:
         from tests.fakes import FakeFactory, initial_task
