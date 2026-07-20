@@ -17,7 +17,11 @@ from ...types import EnvironmentStatus
 from ..base import AgentEnvironment, EnvironmentDependencyError
 from ..registry import register_environment
 from .dataset import WebShopDataset, WebShopSample
-from .prompts import DEFAULT_WEBSHOP_AGENT_PROMPT, DEFAULT_WEBSHOP_TASK_TEMPLATE
+from .prompts import (
+    DEFAULT_WEBSHOP_AGENT_PROMPT,
+    DEFAULT_WEBSHOP_FORCED_FINAL_PROMPT,
+    DEFAULT_WEBSHOP_TASK_TEMPLATE,
+)
 from .tools import build_webshop_tools
 
 _ACTION_PATTERN = re.compile(r"^(search|click)\[(.*)\]$", re.IGNORECASE | re.DOTALL)
@@ -86,6 +90,10 @@ class ReCodeWebShopEnvironment(AgentEnvironment):
     @property
     def agent_prompt(self) -> str:
         return DEFAULT_WEBSHOP_AGENT_PROMPT
+
+    @property
+    def forced_final_prompt(self) -> str:
+        return DEFAULT_WEBSHOP_FORCED_FINAL_PROMPT
 
     @property
     def context(self) -> dict[str, Any]:

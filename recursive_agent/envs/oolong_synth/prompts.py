@@ -1,226 +1,116 @@
-"""Prompts for autonomous Oolong-Synthetic context decomposition."""
+"""Prompts for flat 64K Oolong-Synthetic context decomposition."""
 
 from __future__ import annotations
 
 from .dataset import OolongSynthSample
 
 
-CHILD_TASK_TEMPLATE = r"""[OOLONG-SYNTH WORKER]
-
-ROLE GATE
-Your private context must contain `oolong_role == "worker"`. You are processing
-only the rows assigned by a root agent. The `submit_answer` tool is shared by the
-harness but is NOT available to workers: never call it. Do not follow the root
-workflow and do not attempt to answer the benchmark question globally.
-
-REPL EXECUTION
-Every executable response must use exactly this Markdown shape:
-
-```repl
-print("example")
-```
-
-That means three backticks immediately followed by `repl`, then code, then
-three closing backticks. Never use `python`, `<repl>`, bare `repl`, or another
-wrapper. Other forms may not execute. Do not claim that code ran, invent its
-output, or continue until the harness returns a `REPL output:` observation.
-
-Read these private fields:
-- `chunk_id`: the unique identifier that must be copied into your report.
-- `expected_rows`: the exact number of complete records assigned to you.
-- `context_window_text`: only your assigned complete records.
-- `dataset_intro`: the dataset and label definitions.
-- `question`: the global question, including filters and candidate labels.
-- `dataset`: the dataset name when available.
-
-INSPECTION AND CLASSIFICATION
-- Inspect every assigned row exactly once. If the text is too large for one
-  observation, choose your own consecutive row pages and print one bounded page
-  per REPL response until all rows have been read. Never abbreviate an Instance.
-  If the harness reports truncation, use smaller pages and reread the affected
-  range. Do not print the same page repeatedly.
-- Python may parse Date and User fields, apply exact metadata filters, and sum
-  labels that you explicitly assigned after reading. Python must never infer a
-  semantic label using keywords, regexes, word lists, guessed rules, or a
-  generated classifier.
-- Classify the meaning of the expected answer, not merely words appearing in an
-  Instance. Do not infer unseen labels from class balance or neighboring rows.
-- The candidate-label universe is exactly the labels allowed by the question.
-  Include zero counts. Do not add a label merely because it is mentioned in the
-  dataset intro.
-
-For `trec_coarse`, use these answer-type meanings:
-- abbreviation: acronym/abbreviation expansion or abbreviation.
-- entity: object, animal, product, language, organization, event, substance, or
-  another concrete entity.
-- description and abstract concept: definition, reason, manner, explanation,
-  purpose, meaning, or another descriptive/abstract answer.
-- human being: person or group of people.
-- location: place.
-- numeric value: count, amount, date, age, distance, price, duration,
-  percentage, or another number.
-
-REPORT CONTRACT
-Return exactly one compact JSON object as your agent answer by setting
-`answer["content"] = json.dumps(report)` and then `answer["ready"] = True`.
-Do not call `submit_answer`. Do not return prose or Markdown fences.
-
-The object must contain:
-`chunk_id`, `rows_seen`, `mode`, `counts`, `totals`, and `uncertain`.
-`rows_seen` must equal `expected_rows`. `uncertain` is a short list of local row
-indices and must not be used to hide unread rows.
-
-- Label tasks: `counts` maps every requested candidate label to its count.
-- User/date tasks with a semantic condition: `counts` maps the requested user or
-  normalized date keys to label counts as needed by the question.
-- Before/after tasks: report target counts in `counts` and population counts in
-  `totals`; boundaries are strict.
-- Calendar-month tasks: use normalized `YYYY-MM` keys and nested label counts.
-
-Never submit a global answer, even if the local result appears decisive."""
+CHUNK_CHAR_LIMIT = 64 * 1024
 
 
 def build_synth_agent_prompt() -> str:
-    return r"""Oolong-Synthetic environment guidance:
+    """Build the single prompt shared by Oolong-Synth roots and workers."""
 
-This environment supplies the complete unlabeled context only through the
-private REPL. It does not pre-split the context and does not choose a chunk size
-or delegation plan. Gold labels and `context_window_text_with_labels` are
-unavailable.
+    prompt = r"""Oolong-Synthetic environment guidance:
 
-ROLE GATE -- CHECK THIS BEFORE ACTING
-Read `context["oolong_role"]` in the REPL.
+The complete dataset is available only in the private REPL context. Records are
+unlabeled. There is no labels file, hidden label field, or tool that reveals the
+answer.
 
-- `root`: solve the global benchmark task and be the only agent allowed to call
-  `submit_answer`.
-- `worker`: ignore the root workflow, follow the delegated worker task, return a
-  local JSON report through `answer`, and NEVER call `submit_answer`.
+This is one flat root/worker workflow. It overrides the generic task-routing
+rules, including the generic 2-4-subtask rule. Every agent receives this same
+prompt; `context["oolong_role"]` decides its role:
 
-The harness exposes the same tools and system prompt to every recursive agent.
-Tool visibility is not authorization. A worker calling `submit_answer` corrupts
-the episode. This role rule overrides any generic instruction to finish with an
-environment tool.
+- `root`: choose direct processing or 64K chunks, merge results, and be the only
+  agent allowed to call `submit_answer`.
+- `worker`: process one assigned chunk, never delegate, never call
+  `submit_answer`, and return one JSON report through `answer`.
 
-REPL EXECUTION -- REQUIRED
-Every executable response must use exactly this Markdown shape:
-
-```repl
-print("example")
-```
-
-That means three backticks immediately followed by `repl`, then code, then
-three closing backticks. Never use `python`, `<repl>`, bare `repl`, or another
-wrapper. Other forms may not execute. Do not claim that code ran, invent its
-output, or continue until the harness returns a `REPL output:` observation.
-Never write `REPL output:` yourself. Never place multiple turns or simulated
-observations in one response.
-
-Your first response must be exactly the single block below, with no prose or
-second block. It measures the real context but does not choose or create chunks:
+Use only executable `repl` blocks for Python. Wait for the real observation
+after each block and never invent a `REPL output:` line. Your first response
+must be exactly this block:
 
 ```repl
 source = context["context_window_text"]
-query = context["question"]
 lines = source.splitlines()
-data_rows = [
+rows = [
     line for line in lines
     if line.startswith("Date:")
     and " || User: " in line
     and " || Instance: " in line
 ]
-first_row = next(i for i, line in enumerate(lines) if line in data_rows)
-dataset_intro = "\n".join(lines[:first_row])
+dataset_intro = context.get("dataset_intro")
+if dataset_intro is None:
+    first_row = next(i for i, line in enumerate(lines) if line in rows)
+    dataset_intro = "\n".join(lines[:first_row])
 print({
     "role": context["oolong_role"],
     "context_chars": len(source),
-    "complete_rows": len(data_rows),
-    "question": query,
+    "complete_rows": len(rows),
+    "question": context["question"],
 })
 ```
 
-`context` is an existing REPL variable. Never import it, rebind it, or retrieve
-it from `__builtins__`/`globals()`. Wait for the real observation before the
-second response. The first response must never call a subagent or
-`submit_answer`.
+Each valid record is one complete line in the exact form
+`Date: ... || User: ... || Instance: ...`. Never split a record. Text before
+the first record is the dataset introduction.
 
-ROOT WORKFLOW -- PLAN FROM THE ACTUAL CONTEXT
-The specialized workflow below overrides the generic 2-4-subtask routing rule.
-Do not use a fixed number of workers, a fixed character threshold, or a copied
-chunking recipe. First inspect compact facts in a REPL response:
+ROOT WORKFLOW
 
-1. Read the question and `context["context_window_text"]` without printing the
-   long context. Measure its character length, identify the label-definition
-   intro, parse complete records, and print only a compact summary such as total
-   characters, complete row count, and metadata-filtered row count. This is not
-   JSON or JSONL: each valid record is one line in the exact shape
-   `Date: ... || User: ... || Instance: ...`; text before the first valid record
-   is the dataset intro.
-2. Interpret exactly what the question needs. Decide whether semantic reading is
-   needed before creating any subagents.
-3. Choose the execution plan from the measured full and filtered sizes, the
-   semantic difficulty, complete-row boundaries, available steps, and useful
-   parallelism. The decision belongs to you, not the environment.
+1. Use the `context_chars` measured above. If it is at most
+   __CHUNK_CHAR_LIMIT__ characters (64K), process the complete task in the root.
+   Read semantic records in consecutive bounded pages so no REPL observation is
+   truncated. Python may parse exact Date/User metadata and aggregate explicit
+   classifications.
+2. If `context_chars` is greater than __CHUNK_CHAR_LIMIT__, use the REPL to
+   greedily split all `rows`, in order, at record boundaries. The sum of
+   `len(row) + 1` in every chunk must be at most __CHUNK_CHAR_LIMIT__ characters.
+   A single record longer than the limit forms its own chunk. Every row must
+   appear in exactly one chunk.
+3. Send the chunks with `spawn_subagents`, in batches if needed. Use the task
+   `Process the assigned Oolong-Synthetic chunk and return its JSON report.`
+   Do not put data rows in the task text. Give each worker a private context with
+   only these fields: `oolong_role="worker"`, unique `chunk_id`, exact
+   `expected_rows`, that chunk's rows in `context_window_text`, `dataset_intro`,
+   the global `question`, and `dataset`.
+4. Parse every worker result with `json.loads`. Verify each chunk id once,
+   `rows_seen == expected_rows`, and all requested labels or grouping keys are
+   present. Retry only a missing or malformed chunk. Merge the verified partial
+   counts, perform the final ranking/comparison/arithmetic, and call
+   `submit_answer(...)` exactly once in the format requested by the question.
 
-The records are intentionally UNLABELED. There is no hidden label field, labels
-file, labeled dataset object, or tool that reveals the answer. Do not search the
-context, filesystem, source tree, or prompt files for labels. Do not count the
-words "spam", "ham", or label names inside Instance text. Semantic labels can
-only be produced by an agent reading the meaning of each Instance.
+WORKER WORKFLOW
 
-Use Python directly for exact metadata-only questions, including unconditioned
-User/Date frequencies and represented-N-times counts. No subagent is needed for
-work that Python can solve exactly without semantic labels.
+Read every assigned record exactly once, using consecutive bounded pages if the
+chunk does not fit in one observation. If an observation is truncated, shrink
+the page and reread only that page. Classify the meaning of each Instance; do
+not classify with keywords, regexes, word lists, label-name matches, or guessed
+class balance. Python may parse exact Date/User metadata and add labels that you
+explicitly assigned after reading.
 
-When semantic labels are needed, first apply every exact Date/User filter in
-Python. Chunk only the remaining complete rows. Small filtered subsets may be
-read directly or sent to one worker. Larger subsets may use as many disjoint
-workers or sequential batches as their measured size justifies. Make each chunk
-small enough that its worker can inspect every Instance through one or more
-bounded REPL observations and still return its report. Never split a record,
-drop a remainder, overlap chunks, or send the full context to every worker.
+Apply the question's Date/User filters to your own rows. Return a compact raw
+JSON object with `chunk_id`, `rows_seen`, `counts`, and `totals`. Include zero
+counts for every candidate label, and make `rows_seen` equal `expected_rows`.
+Use `counts` for the question's additive partial results and `totals` for any
+population/denominator counts needed by before/after or ratio questions. For
+User/Date/month questions, use those normalized keys with nested label counts.
+Set `answer["content"] = json.dumps(report)` and then
+`answer["ready"] = True`. Return no prose or Markdown. A worker must never call
+`submit_answer` and must never spawn another agent.
 
-Balance throughput rather than choosing extremes. A worker should need only a
-small number of consecutive observation pages, but do not create hundreds of
-tiny workers when larger readable chunks would keep the same parallel capacity
-busy. For very large relevant sets, prefer staged batches of balanced multi-row
-chunks over one enormous all-at-once request list. Scale both chunk size and
-worker count from the measured relevant characters and rows.
+SEMANTIC RULES
 
-After the first measurement, route immediately. If all relevant Instances
-cannot be read completely in the root's few remaining bounded observations,
-delegation is required in the next response. Do not spend another response
-inspecting context keys, sample rows, dataset metadata, files, or possible label
-locations. Decide the worker count and complete-row ranges yourself from the
-measured relevant size; the environment deliberately supplies no threshold or
-precomputed plan.
+Labels come only from reading each Instance. For `trec_coarse`: abbreviation is
+an acronym or expansion; entity is a concrete object, organization, product,
+language, event, animal, or substance; description and abstract concept asks
+for a definition, reason, manner, explanation, purpose, or meaning; human being
+is a person or group; location is a place; numeric value is a count, amount,
+date, age, distance, price, duration, percentage, or other number.
 
-DELEGATION CONTRACT
-For each worker request, use `context["child_task_template"]` as the task prefix
-and include the global question plus any task-specific reporting requirement.
-Pass a private context containing at least:
-
-- `oolong_role`: exactly `worker`;
-- a unique `chunk_id` and integer `expected_rows`;
-- only that chunk in `context_window_text`;
-- `dataset_intro`, `question`, and `dataset`.
-
-Workers must classify semantic meaning by reading. Root-side or worker-side
-keyword/regex/word-list classifiers are forbidden. Python may only parse exact
-metadata and aggregate classifications explicitly produced by a model.
-
-MERGE AND SUBMIT
-Parse worker answers as JSON. Before using them, verify that every requested
-`chunk_id` appears exactly once, every `rows_seen` equals its `expected_rows`,
-all requested candidate labels are present, and no report is an Error or
-malformed response. Retry only failed or uncertain chunks with a clearer task;
-never replace missing evidence with a guess. Merge counts exactly and compute
-global rankings, comparisons, ratios, second-most values, and month/date results
-only after coverage is complete.
-
-Call `submit_answer(...)` exactly once, from the root, with the prefix and format
-requested by the question, for example `Answer: 17`, `Label: entity`,
-`User: 12345`, or `Date: 01/31/2024`. Do not set `answer` for the root and do not
-wrap the submitted value in Markdown or `\boxed{}`."""
+The root must not replace failed worker coverage with a keyword classifier or a
+guess. Only the root submits the global answer; workers only report their own
+chunks."""
+    return prompt.replace("__CHUNK_CHAR_LIMIT__", f"{CHUNK_CHAR_LIMIT:,}")
 
 
 DEFAULT_SYNTH_TASK_TEMPLATE = """Solve this Oolong-Synthetic benchmark task.
@@ -229,11 +119,8 @@ Question:
 {question}
 
 The complete unlabeled dataset is available only in the private REPL variable
-`context["context_window_text"]`. Measure and inspect it through the REPL, then
-design the processing and subagent distribution yourself from the question and
-the actual amount of relevant context. The environment has not pre-chunked the
-data. Finish by calling `submit_answer(...)` with the exact format requested by
-the question."""
+`context["context_window_text"]`. Follow the environment's single 64K routing
+workflow and finish with `submit_answer(...)` in the exact requested format."""
 
 
 def build_synth_task_prompt(
@@ -248,10 +135,16 @@ def build_synth_task_prompt(
 
 DEFAULT_SYNTH_AGENT_PROMPT = build_synth_agent_prompt()
 
+DEFAULT_SYNTH_FORCED_FINAL_PROMPT = """No working steps remain. Return the best final answer for the Oolong-Synthetic
+question as plain text using the answer format requested by the task. Do not add
+analysis, Markdown fences, or unsupported alternatives. Do not use tools,
+subagents, or submit_answer now."""
+
 __all__ = [
-    "CHILD_TASK_TEMPLATE",
+    "CHUNK_CHAR_LIMIT",
     "DEFAULT_SYNTH_AGENT_PROMPT",
     "DEFAULT_SYNTH_TASK_TEMPLATE",
+    "DEFAULT_SYNTH_FORCED_FINAL_PROMPT",
     "build_synth_agent_prompt",
     "build_synth_task_prompt",
 ]

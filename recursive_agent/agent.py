@@ -113,6 +113,7 @@ class RecursiveAgent:
         max_observation_chars: int | None = 8000,
         termination_check: TerminationCheck | None = None,
         prompt_addendum: str | None = None,
+        forced_final_prompt: str | None = None,
         disabled_repl_builtins: frozenset[str] | set[str] | None = None,
         client_factory: ClientFactory | None = None,
     ) -> None:
@@ -130,6 +131,9 @@ class RecursiveAgent:
         self._tool_values = tool_values(self._tools)
         self._formatted_tools = format_tools_for_prompt(self._tools)
         self._prompt_addendum = str(prompt_addendum).strip() if prompt_addendum else None
+        self._forced_final_prompt = (
+            str(forced_final_prompt).strip() if forced_final_prompt else None
+        )
         self._system_prompt = build_system_prompt(
             self._formatted_tools,
             prompt_addendum=self._prompt_addendum,
@@ -404,7 +408,12 @@ class RecursiveAgent:
         latest_response: str | None,
         local_usage: _UsageAccumulator,
     ) -> AgentResult:
-        messages.append({"role": "user", "content": FORCED_FINAL_USER})
+        messages.append(
+            {
+                "role": "user",
+                "content": self._forced_final_prompt or FORCED_FINAL_USER,
+            }
+        )
         answer = self._call_model(
             client,
             messages,

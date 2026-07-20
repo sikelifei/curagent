@@ -45,9 +45,7 @@ def main() -> None:
         (
             "DELEGATED CHILD INITIAL USER PROMPT",
             build_initial_user(
-                environment.context["child_task_template"]
-                + "\n\nQuestion: "
-                + sample["question"],
+                "Process the assigned Oolong-Synthetic chunk and return its JSON report.",
                 delegated=True,
             ),
         ),

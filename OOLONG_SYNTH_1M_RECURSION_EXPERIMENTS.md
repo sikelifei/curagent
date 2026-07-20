@@ -8,6 +8,10 @@ These are single-example engineering checks against the unfiltered 1M-token
 bucket. They test whether prompt-selected decomposition can process the complete
 semantic workload. They are not benchmark estimates.
 
+The adaptive/paged/hierarchical prompt flows described below are historical
+failed iterations. They were removed after these runs; the current environment
+uses one flat 64K prompt and no `--prompt-flow` option.
+
 The model API is `deepseek-v4-flash`. All runs use temperature 0, one episode
 worker, 4,096 maximum output tokens per model call, 16 maximum concurrent
 subagents, and source index 650 from the validation split.
@@ -33,11 +37,35 @@ The same sample with a 12,000-character observation limit, depth 1, and a
 Output directory:
 `outputs/oolong_synth/deepseek_v4_flash_adaptive_1m_full_semantic_20260717`.
 
-## Prompt Flows
+## Failure Analysis
 
-The original A prompt is preserved byte-for-byte in
-`recursive_agent/envs/oolong_synth/prompts.py`. The selectable alternatives
-live in `flow_prompts.py` and are selected with `--prompt-flow`:
+The runs exposed a prompt-design failure rather than a missing recursion
+primitive:
+
+- The adaptive prompt left chunk size, fan-out, paging, retry policy, and report
+  shape open at the same time. Run A1 created 26 top-level children and 477
+  calls, yet still produced one wrong answer and one timeout.
+- The paged prompt reduced observation size but did not guarantee completion.
+  Workers were rejected by content inspection or quota limits, so the root
+  reached a forced final answer with incomplete coverage.
+- The hierarchical prompt added role flags, two child modes, nested context
+  construction, and another merge layer. C1 built malformed child contexts and
+  fell back to a forbidden regex classifier. C2 reached depth 2 and happened to
+  answer correctly, but 14 of 33 leaf attempts did not complete normally and
+  the run still required 719 calls. That is not reliable evidence of a complete
+  merge.
+
+The replacement removes model-selected flow design. The root reads the context
+and measures its character length in the REPL. It processes inputs up to 64K
+(65,536 characters) itself; above that threshold it creates disjoint
+complete-record chunks of at most 65,536 characters. Flat workers process those
+chunks without further delegation, and the root validates coverage and merges
+their reports.
+
+## Retired Prompt Flows
+
+At the time of the experiments, the alternatives were selected with
+`--prompt-flow`:
 
 - `adaptive_flat`: original model-selected adaptive prompt, depth 1.
 - `paged_flat`: flat workers with bounded pages, depth 1.
@@ -171,7 +199,7 @@ real depth-2 tree and returned a correct answer on the full 1M sample.
 
 ## Code Boundary
 
-Prompt flows may decide filtering, chunk sizes, fan-out, recursion, and merging.
 The generic `RecursiveAgent`, REPL observation truncation, subagent scheduler,
-and depth implementation remain unchanged. A runtime prompt-flow selector may
-choose between preserved prompt variants; it must not implement decomposition.
+and depth implementation remain unchanged. The environment does not pre-chunk
+the dataset. The root performs length measurement, filtering, 64K chunking,
+dispatch, and merging through the REPL under the single environment prompt.

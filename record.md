@@ -1,6 +1,4 @@
- python -u -m examples.run_webshop_batch --config configs/model_api.local.yaml
-  │ --recode-root /data2/zhangwenjian/agent/ReCode --split test --start-index 0 --count 200 --concurrency 8 --seed 233 --env-max-steps 30 --agent-max-steps 35 --max-depth 2
-  │ --max-concurrent-subagents 4 --max-run-seconds 900 --trace-jsonl outputs/webshop_200_prompt_v3_traces.jsonl --summary-json outputs/webshop_200_prompt_v3_summary.json
+ python -u -m examples.run_webshop_batch --config configs/model_api.local.yaml --recode-root /data2/zhangwenjian/agent/ReCode --split test --start-index 0 --count 200 --concurrency 8 --seed 233 --env-max-steps 15 --agent-max-steps 15 --max-depth 2 --max-concurrent-subagents 4 --max-run-seconds 300 --trace-jsonl outputs/webshop_200_prompt_v3_traces.jsonl --summary-json outputs/webshop_200_prompt_v3_summary.json
  
 
 ## Qwen3-4B prompt fix 20 条验证

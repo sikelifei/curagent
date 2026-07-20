@@ -16,14 +16,10 @@ from .dataset import (
     OolongSynthSample,
 )
 from .prompts import (
+    DEFAULT_SYNTH_AGENT_PROMPT,
+    DEFAULT_SYNTH_FORCED_FINAL_PROMPT,
     DEFAULT_SYNTH_TASK_TEMPLATE,
     build_synth_task_prompt,
-)
-from .flow_prompts import (
-    DEFAULT_PROMPT_FLOW,
-    PROMPT_FLOWS,
-    build_flow_prompt,
-    child_task_template,
 )
 from .scoring import evaluate_synth_response
 from .tools import build_synth_tools
@@ -46,13 +42,7 @@ class OolongSynthEnvironment(AgentEnvironment):
         load_kwargs: Mapping[str, Any] | None = None,
         prompt_template: str = DEFAULT_SYNTH_TASK_TEMPLATE,
         agent_prompt: str | None = None,
-        prompt_flow: str = DEFAULT_PROMPT_FLOW,
     ) -> None:
-        if prompt_flow not in PROMPT_FLOWS:
-            raise ValueError(
-                f"unknown Oolong-Synth prompt flow {prompt_flow!r}; "
-                f"choose one of {PROMPT_FLOWS}"
-            )
         self.dataset = OolongSynthDataset(
             oolong_root=oolong_root,
             split=split,
@@ -64,11 +54,10 @@ class OolongSynthEnvironment(AgentEnvironment):
         )
         self.sample: OolongSynthSample = self.dataset[instance_id]
         self._task = build_synth_task_prompt(self.sample, template=prompt_template)
-        self._prompt_flow = prompt_flow
         self._agent_prompt = (
             str(agent_prompt).strip()
             if agent_prompt is not None
-            else build_flow_prompt(prompt_flow)
+            else DEFAULT_SYNTH_AGENT_PROMPT
         )
         self._submitted_answer: str | None = None
         self._closed = False
@@ -88,8 +77,6 @@ class OolongSynthEnvironment(AgentEnvironment):
             "task": self.sample.task,
             "input_subset": self.sample.input_subset,
             "context_window_text": self.sample.context_window_text,
-            "child_task_template": child_task_template(prompt_flow),
-            "prompt_flow": prompt_flow,
             "source": self.dataset.metadata()["source"],
         }
 
@@ -100,6 +87,10 @@ class OolongSynthEnvironment(AgentEnvironment):
     @property
     def agent_prompt(self) -> str:
         return self._agent_prompt
+
+    @property
+    def forced_final_prompt(self) -> str:
+        return DEFAULT_SYNTH_FORCED_FINAL_PROMPT
 
     @property
     def context(self) -> dict[str, Any]:

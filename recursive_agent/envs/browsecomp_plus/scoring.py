@@ -34,9 +34,9 @@ The correct field must be boolean, score must be 0 or 1, and reason must be a
 short string."""
 
 _FINAL_PATTERN = re.compile(
-    r"(?ims)^\s*Explanation:\s*(.*?)\s*"
-    r"^Exact Answer:\s*(.*?)\s*"
-    r"^Confidence:\s*(\d+(?:\.\d+)?)\s*%\s*$"
+    r"(?ims)^\s*(?:\*\*)?Explanation:\*{0,2}\s*(.*?)\s*"
+    r"^\s*(?:\*\*)?Exact Answer:\*{0,2}\s*(.*?)\s*"
+    r"^\s*(?:\*\*)?Confidence:\*{0,2}\s*(\d+(?:\.\d+)?)\s*%\s*$"
 )
 
 
@@ -55,7 +55,22 @@ class JudgeResult:
 
 
 def parse_final_output(response: str) -> dict[str, Any] | None:
-    match = _FINAL_PATTERN.fullmatch(str(response).strip())
+    text = str(response).strip()
+    # Models often wrap an otherwise valid answer in a Markdown code fence.
+    lines = text.splitlines()
+    if lines and lines[0].strip().startswith("```"):
+        lines = lines[1:]
+    if lines and lines[-1].strip() == "```":
+        lines = lines[:-1]
+    text = "\n".join(lines).strip()
+    # A forced-final response may include a short preamble before the required
+    # three-line answer. Keep the structured block and ignore that preamble.
+    explanation_start = re.search(
+        r"(?im)^\s*(?:\*\*)?Explanation:\*{0,2}", text
+    )
+    if explanation_start is not None:
+        text = text[explanation_start.start() :]
+    match = _FINAL_PATTERN.fullmatch(text)
     if match is None:
         return None
     confidence = float(match.group(3))

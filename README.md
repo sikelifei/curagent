@@ -243,17 +243,14 @@ The Oolong plugin keeps the root prompt and recursive agent unchanged. Its envir
 
 `oolong_synth` is a separate environment for evaluating curagent on the
 Oolong-Synthetic validation protocol. The environment supplies the unlabeled
-long context without pre-chunking it. The root measures the actual full and
-question-filtered sizes in the private REPL, then chooses direct metadata
-parsing or its own complete-row subagent distribution. Semantic workers return
-coverage-checked JSON reports, and only the root submits the final answer.
+long context without pre-chunking it. One shared environment prompt tells the
+root to read and measure the complete context in the REPL. The root handles
+inputs up to 64K (65,536 characters) directly; above that limit it splits
+complete records into chunks of at most 65,536 characters and
+dispatches workers. Workers process their own chunks, the root validates and
+merges their JSON reports, and only the root submits the final answer.
 `--data-path` accepts a JSON/JSONL file, one parquet file, or a downloaded
 dataset directory containing `data/validation-*.parquet`.
-
-The environment prompt flow is selectable without changing the generic root
-prompt: `--prompt-flow adaptive_flat` keeps the original adaptive flow,
-`paged_flat` emphasizes bounded worker pages, and `hierarchical` permits a
-coarse worker to recurse into leaf workers when `--max-depth 2` is enabled.
 
 Inspect every prompt layer without loading data or calling a model:
 

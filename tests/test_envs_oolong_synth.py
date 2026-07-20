@@ -9,11 +9,10 @@ from pathlib import Path
 
 from recursive_agent.envs import available_environments
 from recursive_agent.envs.oolong_synth import (
+    CHUNK_CHAR_LIMIT,
     DEFAULT_SYNTH_AGENT_PROMPT,
     OolongSynthDataset,
     OolongSynthEnvironment,
-    PROMPT_FLOWS,
-    build_flow_prompt,
     evaluate_synth_response,
     parse_synth_response,
     select_protocol_indices,
@@ -52,10 +51,10 @@ class OolongSynthEnvironmentTests(unittest.TestCase):
             environment = OolongSynthEnvironment(samples=[sample_row()])
         self.assertNotIn("answer", environment.context)
         self.assertNotIn("gold", environment.context)
-        self.assertIn("child_task_template", environment.context)
         self.assertEqual(environment.context["oolong_role"], "root")
         self.assertNotIn("context_len", environment.context)
         self.assertNotIn("context_chars", environment.context)
+        self.assertNotIn("prompt_flow", environment.context)
 
     def test_downloaded_validation_parquet_directory_loads(self) -> None:
         try:
@@ -133,45 +132,26 @@ class OolongSynthEnvironmentTests(unittest.TestCase):
         lengths = Counter(metadata[index]["context_len"] for index in first)
         self.assertEqual(set(lengths.values()), {15, 16})
 
-    def test_prompt_uses_model_selected_decomposition_and_registry_is_loaded(self) -> None:
+    def test_prompt_uses_single_64k_root_worker_flow(self) -> None:
+        self.assertEqual(CHUNK_CHAR_LIMIT, 65_536)
         self.assertIn('context["oolong_role"]', DEFAULT_SYNTH_AGENT_PROMPT)
-        self.assertIn("Measure its character length", DEFAULT_SYNTH_AGENT_PROMPT)
-        self.assertIn("does not pre-split", DEFAULT_SYNTH_AGENT_PROMPT)
-        self.assertIn("metadata-only questions", DEFAULT_SYNTH_AGENT_PROMPT)
-        self.assertIn("expected_rows", DEFAULT_SYNTH_AGENT_PROMPT)
-        self.assertIn("NEVER call `submit_answer`", DEFAULT_SYNTH_AGENT_PROMPT)
-        self.assertIn("exactly this Markdown shape", DEFAULT_SYNTH_AGENT_PROMPT)
-        self.assertIn("Never use `python`, `<repl>`, bare `repl`", DEFAULT_SYNTH_AGENT_PROMPT)
-        self.assertIn("first response must be exactly the single block", DEFAULT_SYNTH_AGENT_PROMPT)
+        self.assertIn('source = context["context_window_text"]', DEFAULT_SYNTH_AGENT_PROMPT)
         self.assertIn('"context_chars": len(source)', DEFAULT_SYNTH_AGENT_PROMPT)
-        self.assertIn("This is not\n   JSON or JSONL", DEFAULT_SYNTH_AGENT_PROMPT)
-        self.assertIn("records are intentionally UNLABELED", DEFAULT_SYNTH_AGENT_PROMPT)
-        self.assertIn("route immediately", DEFAULT_SYNTH_AGENT_PROMPT)
-        self.assertNotIn("8_000", DEFAULT_SYNTH_AGENT_PROMPT)
-        self.assertNotIn("max_chars=", DEFAULT_SYNTH_AGENT_PROMPT)
-        self.assertNotIn("EXACTLY FOUR", DEFAULT_SYNTH_AGENT_PROMPT)
+        self.assertIn("context_chars` measured above", DEFAULT_SYNTH_AGENT_PROMPT)
+        self.assertIn("greater than 65,536", DEFAULT_SYNTH_AGENT_PROMPT)
+        self.assertIn("record boundaries", DEFAULT_SYNTH_AGENT_PROMPT)
+        self.assertIn("process the complete task in the root", DEFAULT_SYNTH_AGENT_PROMPT)
+        self.assertIn("Send the chunks with `spawn_subagents`", DEFAULT_SYNTH_AGENT_PROMPT)
+        self.assertIn("expected_rows", DEFAULT_SYNTH_AGENT_PROMPT)
+        self.assertIn("must never spawn another agent", DEFAULT_SYNTH_AGENT_PROMPT)
+        self.assertIn("Only the root submits", DEFAULT_SYNTH_AGENT_PROMPT)
+        self.assertNotIn("adaptive_flat", DEFAULT_SYNTH_AGENT_PROMPT)
+        self.assertNotIn("hierarchical", DEFAULT_SYNTH_AGENT_PROMPT)
         blocks = DEFAULT_SYNTH_AGENT_PROMPT.split("```repl\n")[1:]
-        self.assertGreaterEqual(len(blocks), 2)
+        self.assertEqual(len(blocks), 1)
         for block in blocks:
             ast.parse(block.split("```", 1)[0])
         self.assertIn("oolong_synth", available_environments())
-
-    def test_prompt_flow_switch_preserves_default_and_selects_variants(self) -> None:
-        self.assertEqual(PROMPT_FLOWS, ("adaptive_flat", "paged_flat", "hierarchical"))
-        self.assertEqual(build_flow_prompt("adaptive_flat"), DEFAULT_SYNTH_AGENT_PROMPT)
-        self.assertNotEqual(
-            build_flow_prompt("paged_flat"), DEFAULT_SYNTH_AGENT_PROMPT
-        )
-        self.assertNotEqual(
-            build_flow_prompt("hierarchical"), DEFAULT_SYNTH_AGENT_PROMPT
-        )
-        environment = OolongSynthEnvironment(
-            samples=[sample_row()], prompt_flow="hierarchical"
-        )
-        self.assertEqual(environment.context["prompt_flow"], "hierarchical")
-        self.assertIn("can_delegate", environment.context["child_task_template"])
-        with self.assertRaises(ValueError):
-            OolongSynthEnvironment(samples=[sample_row()], prompt_flow="unknown")
 
 
 if __name__ == "__main__":

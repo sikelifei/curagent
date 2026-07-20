@@ -10,6 +10,7 @@ from ..registry import register_environment
 from .dataset import BrowseCompQuery
 from .prompts import (
     DEFAULT_BROWSECOMP_AGENT_PROMPT,
+    DEFAULT_BROWSECOMP_FORCED_FINAL_PROMPT,
     DEFAULT_BROWSECOMP_TASK_TEMPLATE,
     build_browsecomp_task_prompt,
 )
@@ -64,6 +65,10 @@ class BrowseCompPlusEnvironment(AgentEnvironment):
     @property
     def agent_prompt(self) -> str:
         return self._agent_prompt
+
+    @property
+    def forced_final_prompt(self) -> str:
+        return DEFAULT_BROWSECOMP_FORCED_FINAL_PROMPT
 
     @property
     def disabled_repl_builtins(self) -> frozenset[str]:

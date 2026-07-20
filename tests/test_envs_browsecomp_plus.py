@@ -258,7 +258,7 @@ class BrowseCompPlusEnvironmentTests(unittest.TestCase):
                 max_subagents_per_agent=0,
             )
 
-    def test_final_output_parser_is_strict(self) -> None:
+    def test_final_output_parser_accepts_common_markdown_wrappers(self) -> None:
         parsed = parse_final_output(
             "Explanation: supported by [12]\n"
             "Exact Answer: Ada Lovelace\n"
@@ -266,6 +266,21 @@ class BrowseCompPlusEnvironmentTests(unittest.TestCase):
         )
         self.assertEqual(parsed["exact_answer"], "Ada Lovelace")
         self.assertEqual(parsed["confidence"], 85.0)
+        wrapped = parse_final_output(
+            "```text\n"
+            "**Explanation:** supported by [12]\n"
+            "**Exact Answer:** Ada Lovelace\n"
+            "**Confidence:** 85%\n"
+            "```"
+        )
+        self.assertEqual(wrapped["exact_answer"], "Ada Lovelace")
+        with_preamble = parse_final_output(
+            "I could not find more evidence.\n\n"
+            "Explanation: no matching document [12]\n"
+            "Exact Answer: Unknown\n"
+            "Confidence: 0%"
+        )
+        self.assertEqual(with_preamble["exact_answer"], "Unknown")
         self.assertIsNone(parse_final_output("Ada Lovelace"))
         self.assertIsNone(
             parse_final_output(

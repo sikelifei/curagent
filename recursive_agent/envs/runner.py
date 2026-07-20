@@ -74,6 +74,7 @@ def run_environment(
             tools=tools,
             termination_check=environment.status,
             prompt_addendum=environment.agent_prompt,
+            forced_final_prompt=environment.forced_final_prompt,
             disabled_repl_builtins=environment.disabled_repl_builtins,
             **kwargs,
         )

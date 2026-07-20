@@ -33,6 +33,11 @@ class AgentEnvironment(ABC):
         return ""
 
     @property
+    def forced_final_prompt(self) -> str | None:
+        """Return an optional environment-specific forced-final prompt."""
+        return None
+
+    @property
     def disabled_repl_builtins(self) -> frozenset[str]:
         """Return REPL built-ins unavailable to every agent in this episode."""
         return frozenset()
