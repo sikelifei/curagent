@@ -17,15 +17,16 @@ explicitly delegated objective.
 ROOT first turns the question into constraints C1, C2, ... and records their
 dependencies. Keep sequentially dependent constraints in one branch. BrowseComp
 questions are multi-constraint identity searches:
-ROOT MUST create 2-4 strictly smaller, non-overlapping evidence branches and
-call `spawn_subagents(requests)` in its FIRST `repl` block. This is a hard
-protocol gate, not a suggestion. ROOT MUST NOT search, investigate a branch,
-or answer before collecting child reports. Keep dependencies inside a branch:
+FIRST-ACTION CONTRACT: ROOT's first model action must be a `repl` block that
+creates 2-4 strictly smaller, non-overlapping evidence branches and calls
+`spawn_subagents(requests)`. Do not write prose or call `search` first. This is
+a hard protocol gate; it applies even when the task looks sequential. ROOT
+must collect child reports before any search or answer. Keep dependencies in a branch:
 if C4 requires an entity found by C3, assign C3+C4 together. Each child has a
 strictly smaller, non-overlapping objective; never pass the original unchanged.
 
-Pass each child the original question, its objective, relevant constraints,
-leads, selected documents, attempted queries, and exclusions. Children do not
+Pass each child the original question, objective, leads, documents, queries,
+and exclusions. Children do not
 inherit caller messages or REPL variables. Collect reports with:
 
 ```repl
@@ -52,9 +53,11 @@ Recommended next action: <specific follow-up or NONE>
 
 A NOT_FOUND report lists attempted queries, rejected candidates, useful leads,
 and the missing fact. Once a worker returns, ROOT owns any retry. First merge
-reports into the evidence matrix; search only one remaining gap or delegate one
-narrower retry with a new lead. Do not repeat the delegation unchanged or reuse
-a worker query family. If no new lead appears, mark the path MISSING and stop.
+reports into the evidence matrix. The search budget is not a target: do at most
+two root follow-up searches, only for remaining gaps, or delegate one narrower
+retry with a new lead. Do not repeat the delegation unchanged; avoid worker
+query families. If no
+new lead appears, mark the path MISSING and stop.
 
 ROOT merges reports into a candidate-by-constraint evidence matrix. Mark each
 cell VERIFIED, PARTIAL, CONTRADICTED, or MISSING and attach docids. Do not vote
@@ -63,7 +66,7 @@ one targeted adjudication task. Search only remaining gaps, then select the
 candidate with the strongest cross-constraint support. Explicitly calculate
 date, numeric, ordering, and geographic relations.
 
-Use short, distinctive queries and refine them with newly discovered names,
+Use distinctive queries and refine them with newly discovered names,
 phrases, dates, organizations, places, or titles. Execute tools only in `repl`
 blocks. Keep results in persistent variables and print compact catalogs:
 
@@ -96,14 +99,16 @@ Question:
 Find and verify the answer, then return the required Explanation / Exact Answer /
 Confidence format without adding other sections."""
 
-DEFAULT_BROWSECOMP_FORCED_FINAL_PROMPT = """No working steps remain. This response
-is parsed directly and code will not execute. Choose the best-supported answer
-now. The first character must be the E in "Explanation". Return exactly these
-three lines, with no preamble, Markdown fence, tools, or further investigation:
+DEFAULT_BROWSECOMP_FORCED_FINAL_PROMPT = """FINAL FORMAT OVERRIDE. Replace your
+entire previous response now. No reasoning, prose, Markdown, code, tools, or
+further investigation will be executed. Return exactly three newline-separated
+lines; the first character must be E in "Explanation":
 
 Explanation: brief explanation with citations such as [12345]
 Exact Answer: the shortest unambiguous answer
-Confidence: 0-100%"""
+Confidence: 0-100%
+
+Do not add any other characters or lines."""
 
 
 def build_browsecomp_task_prompt(
