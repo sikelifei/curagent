@@ -211,10 +211,41 @@ class BrowseCompPlusEnvironmentTests(unittest.TestCase):
         self.assertEqual(stats["max_depth_reached"], 1)
         self.assertTrue(stats["root_used_search"])
         self.assertTrue(stats["subagent_used_search"])
+        normalized_prompt = " ".join(environment.agent_prompt.split())
         self.assertIn("fixed BrowseComp-Plus corpus", environment.agent_prompt)
-        self.assertNotIn("worker", environment.agent_prompt.lower())
-        self.assertNotIn("spawn_subagent", environment.agent_prompt)
-        self.assertNotIn("recurse", environment.agent_prompt.lower())
+        self.assertIn(
+            "Search and recursive delegation strategy",
+            environment.agent_prompt,
+        )
+        self.assertIn(
+            "strictly smaller than its parent task",
+            environment.agent_prompt,
+        )
+        self.assertIn("non-overlapping requests", environment.agent_prompt)
+        self.assertIn(
+            "pass its own objective or query plan downward unchanged",
+            environment.agent_prompt,
+        )
+        self.assertIn(
+            "do not output a formal constraint table",
+            normalized_prompt,
+        )
+        self.assertIn(
+            "Split the task when it contains at least two independent",
+            normalized_prompt,
+        )
+        self.assertIn(
+            "delegation should happen before broad root searching",
+            normalized_prompt,
+        )
+        self.assertNotIn(
+            "Every delegated task should contain the original question",
+            environment.agent_prompt,
+        )
+        self.assertNotIn(
+            "Demonstration: recursive BrowseComp investigation",
+            environment.agent_prompt,
+        )
 
     def test_runtime_caps_total_direct_subagents_per_agent(self) -> None:
         from tests.fakes import FakeFactory, initial_task
