@@ -218,9 +218,9 @@ class BrowseCompPlusEnvironmentTests(unittest.TestCase):
         self.assertIn("BrowseComp-Plus", system_prompt)
         self.assertIn("You are a general recursive agent", system_prompt)
         normalized_prompt = " ".join(environment.agent_prompt.split())
-        self.assertIn("original question", normalized_prompt)
-        self.assertIn("worker", normalized_prompt)
-        self.assertIn("Explanation / Exact Answer / Confidence", environment.agent_prompt)
+        self.assertIn("narrow objective", normalized_prompt)
+        self.assertIn("Compare reports", normalized_prompt)
+        self.assertIn("synthesize the answer", normalized_prompt)
         self.assertLess(len(environment.agent_prompt), 4000)
 
     def test_environment_runner_uses_browsecomp_system_only(self) -> None:

@@ -138,59 +138,28 @@ continue using your own reasoning and available tools.
 """
 
 
-BROWSECOMP_ROOT_TASK_ROUTING_PROMPT = """## BrowseComp root role
+BROWSECOMP_TASK_ROUTING_PROMPT = """## BrowseComp evidence search
 
-You are the ROOT coordinator for BrowseComp-Plus. You own the original question,
-decomposition, evidence comparison, retries, and final answer.
+Use only the fixed corpus. Your first response must be one executable `repl`
+block, not a plan or answer.
 
-The corpus search belongs to workers. If evidence is needed, your first REPL
-block must delegate before any search call. Do not call `search` yourself.
+For the root, delegate corpus search: create one worker for one linked evidence
+chain, or 2-4 workers for genuinely independent constraints. Give each worker a
+narrow objective, useful leads, and exclusions; never repeat the full question.
 
-DIRECT: for one coherent evidence chain, create exactly one worker with that
-objective.
+For a worker, search its assigned objective. Recurse only when search results
+reveal two independent narrower checks. Keep results in REPL variables, print
+short snippets, and record docids. Do not repeat queries, search docids as
+documents, or issue more than 4 distinct queries without reporting.
 
-DECOMPOSE: for two or more independent searchable constraints, create 2-4
-non-overlapping worker requests, one constraint per request. Include the
-original question, exact objective, useful leads, and exclusions. Never send the
-unchanged full question to multiple workers.
+Stop after decisive evidence or two searches with no new lead. Reports must
+separate candidates, supported claims, docids, and unresolved facts. Treat child
+reports as evidence to verify, not as truth. The root returns the final answer;
+delegated nodes return a compact worker report."""
 
-After reports arrive, accept verified evidence, delegate one narrower retry with
-a genuinely new lead, or delegate the next unresolved constraint. At most one
-retry worker is allowed per unresolved branch. Then synthesize the supplied
-evidence; do not search.
-
-Workers do the search and return reports. You only route, compare, and answer.
-"""
-
-BROWSECOMP_WORKER_TASK_ROUTING_PROMPT = """## BrowseComp worker role
-
-You are a WORKER. Solve only the delegated search objective and return a compact
-evidence report to the caller. Do not solve the original question globally.
-
-Search only through the fixed corpus. Keep each search result in a REPL variable,
-then filter and compare it with Python and print bounded snippets. Stop when a
-decisive document or candidate is found. Otherwise stop after at most 4 distinct
-queries, or after two queries add no new useful lead, and report `PARTIAL` or
-`NOT_FOUND`. Never repeat a query, use `search("docid:...")` as a full-document
-reader, or keep paraphrasing the same failed search.
-
-Normally finish your objective directly. You may call `spawn_subagent` or
-`spawn_subagents` only if your own results reveal two or more independent,
-narrower verification tasks. Each child must receive a strictly narrower
-objective and useful context. After child reports return, synthesize them and
-stop; do not continue broad searching.
-
-Return only this internal format through `answer`:
-
-WORKER_REPORT
-Status: VERIFIED | PARTIAL | NOT_FOUND | CONFLICT
-Objective: <assigned search objective>
-Candidates: <names or NONE>
-Evidence: <claims with docids, or NONE>
-Queries tried: <compact list>
-Unresolved: <missing fact or NONE>
-Recommended next action: <targeted retry or NONE>
-"""
+# Kept as aliases for callers that still import the old names.
+BROWSECOMP_ROOT_TASK_ROUTING_PROMPT = BROWSECOMP_TASK_ROUTING_PROMPT
+BROWSECOMP_WORKER_TASK_ROUTING_PROMPT = BROWSECOMP_TASK_ROUTING_PROMPT
 
 
 
@@ -217,7 +186,7 @@ def build_browsecomp_system_prompt() -> str:
     prefix, marker, _ = SYSTEM_PROMPT.partition("\n## Task routing")
     if not marker:
         raise RuntimeError("SYSTEM_PROMPT is missing its task routing section")
-    return f"{prefix.rstrip()}\n\n{BROWSECOMP_ROOT_TASK_ROUTING_PROMPT.strip()}"
+    return f"{prefix.rstrip()}\n\n{BROWSECOMP_TASK_ROUTING_PROMPT.strip()}"
 
 
 def build_browsecomp_worker_system_prompt() -> str:
@@ -225,7 +194,7 @@ def build_browsecomp_worker_system_prompt() -> str:
     prefix, marker, _ = SYSTEM_PROMPT.partition("\n## Task routing")
     if not marker:
         raise RuntimeError("SYSTEM_PROMPT is missing its task routing section")
-    return f"{prefix.rstrip()}\n\n{BROWSECOMP_WORKER_TASK_ROUTING_PROMPT.strip()}"
+    return f"{prefix.rstrip()}\n\n{BROWSECOMP_TASK_ROUTING_PROMPT.strip()}"
 
 
 def build_initial_user(task: str, *, delegated: bool = False) -> str:
