@@ -12,7 +12,9 @@ from .dataset import (
 )
 from .environment import BrowseCompPlusEnvironment
 from .prompts import (
+    DEFAULT_BROWSECOMP_SYSTEM_PROMPT,
     DEFAULT_BROWSECOMP_AGENT_PROMPT,
+    DEFAULT_BROWSECOMP_WORKER_FORCED_FINAL_PROMPT,
     DEFAULT_BROWSECOMP_TASK_TEMPLATE,
     build_browsecomp_task_prompt,
 )
@@ -31,7 +33,9 @@ __all__ = [
     "BrowseCompPlusEnvironment",
     "BrowseCompQuery",
     "BrowseCompTrace",
+    "DEFAULT_BROWSECOMP_SYSTEM_PROMPT",
     "DEFAULT_BROWSECOMP_AGENT_PROMPT",
+    "DEFAULT_BROWSECOMP_WORKER_FORCED_FINAL_PROMPT",
     "DEFAULT_BROWSECOMP_ROOT",
     "DEFAULT_BROWSECOMP_TASK_TEMPLATE",
     "DEFAULT_CANARY",

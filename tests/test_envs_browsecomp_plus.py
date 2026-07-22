@@ -11,7 +11,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from recursive_agent import ConfigurationError, RecursiveAgent
-from recursive_agent.envs import available_environments
+from recursive_agent.envs import available_environments, run_environment
 from recursive_agent.envs.browsecomp_plus import (
     BrowseCompPlusEnvironment,
     BrowseCompQuery,
@@ -199,6 +199,8 @@ class BrowseCompPlusEnvironmentTests(unittest.TestCase):
             backend_kwargs={"model_name": "unused"},
             tools=environment.tools(),
             prompt_addendum=environment.agent_prompt,
+            system_prompt=environment.system_prompt,
+            delegated_forced_final_prompt=environment.delegated_forced_final_prompt,
             disabled_repl_builtins=environment.disabled_repl_builtins,
             max_depth=1,
             max_steps=3,
@@ -211,41 +213,121 @@ class BrowseCompPlusEnvironmentTests(unittest.TestCase):
         self.assertEqual(stats["max_depth_reached"], 1)
         self.assertTrue(stats["root_used_search"])
         self.assertTrue(stats["subagent_used_search"])
+        system_prompt = result.trace.system_prompt
+        self.assertEqual(result.trace.children[0].system_prompt, system_prompt)
+        self.assertIn("DIRECT or DECOMPOSE", system_prompt)
+        self.assertIn("not every task should recurse", system_prompt)
+        self.assertIn("A worker follows the same rule", system_prompt)
+        self.assertIn("single search objective", system_prompt)
+        self.assertIn("narrower than", system_prompt)
+        self.assertIn("You are a general recursive agent", system_prompt)
         normalized_prompt = " ".join(environment.agent_prompt.split())
-        self.assertIn("fixed BrowseComp-Plus corpus", environment.agent_prompt)
-        self.assertIn(
-            "Search and recursive delegation strategy",
-            environment.agent_prompt,
+        self.assertIn("fixed corpus", environment.agent_prompt)
+        self.assertIn('hits = search(', environment.agent_prompt)
+        self.assertIn('h["snippet"][:300]', environment.agent_prompt)
+        self.assertIn("persistent REPL variables", environment.agent_prompt)
+        self.assertIn("bounded snippets", environment.agent_prompt)
+        self.assertIn("ROOT owns the original question", normalized_prompt)
+        self.assertIn("ROOT must first delegate the search", normalized_prompt)
+        self.assertIn("ROOT must first delegate the search", normalized_prompt)
+        self.assertIn("WORKER_REPORT", environment.agent_prompt)
+        self.assertIn("A worker may recurse only", normalized_prompt)
+        self.assertIn("ROOT then accepts", normalized_prompt)
+        self.assertIn("Only ROOT returns the benchmark answer", environment.agent_prompt)
+        self.assertLess(len(environment.agent_prompt), 4000)
+
+    def test_environment_runner_uses_browsecomp_system_only(self) -> None:
+        from tests.fakes import FakeFactory
+
+        environment = BrowseCompPlusEnvironment(
+            sample=BrowseCompQuery("prompt", "Find one entity"),
+            search_client=StubSearchClient(),
         )
-        self.assertIn(
-            "strictly smaller than its parent task",
-            environment.agent_prompt,
+
+        def handler(messages, timeout):
+            return (
+                "```repl\n"
+                "hits = search('entity')\n"
+                "answer['content'] = 'Explanation: evidence [1]\\n"
+                "Exact Answer: Example\\nConfidence: 60%'\n"
+                "answer['ready'] = True\n"
+                "```"
+            )
+
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "model.yaml"
+            config.write_text(
+                "model:\n"
+                "  type: api\n"
+                "  api:\n"
+                "    model: fake\n",
+                encoding="utf-8",
+            )
+            run = run_environment(
+                environment,
+                model_config=config,
+                agent_kwargs={
+                    "max_steps": 1,
+                    "client_factory": FakeFactory(handler),
+                },
+            )
+
+        self.assertIn("general recursive agent", run.system_prompt)
+        self.assertIn("BrowseComp-Plus is an evidence-search task", run.system_prompt)
+        self.assertIn("single search objective", run.system_prompt)
+        self.assertEqual(run.agent_result.trace.system_prompt, run.system_prompt)
+
+    def test_worker_uses_worker_specific_forced_final_prompt(self) -> None:
+        from tests.fakes import FakeFactory, initial_task
+
+        environment = BrowseCompPlusEnvironment(
+            sample=BrowseCompQuery("worker-final", "Question"),
+            search_client=StubSearchClient(),
         )
-        self.assertIn("non-overlapping requests", environment.agent_prompt)
-        self.assertIn(
-            "pass its own objective or query plan downward unchanged",
-            environment.agent_prompt,
-        )
-        self.assertIn(
-            "do not output a formal constraint table",
-            normalized_prompt,
-        )
-        self.assertIn(
-            "Split the task when it contains at least two independent",
-            normalized_prompt,
-        )
-        self.assertIn(
-            "delegation should happen before broad root searching",
-            normalized_prompt,
-        )
-        self.assertNotIn(
-            "Every delegated task should contain the original question",
-            environment.agent_prompt,
-        )
-        self.assertNotIn(
-            "Demonstration: recursive BrowseComp investigation",
-            environment.agent_prompt,
-        )
+
+        def handler(messages, timeout):
+            task = initial_task(messages)
+            if task == "root":
+                if "FINAL FORMAT OVERRIDE" in messages[-1]["content"]:
+                    return (
+                        "Explanation: worker report collected [1]\n"
+                        "Exact Answer: Example\nConfidence: 50%"
+                    )
+                return (
+                    "```repl\n"
+                    "report = spawn_subagent('worker')\n"
+                    "print(report)\n"
+                    "```"
+                )
+            if "BrowseComp-Plus worker" in messages[-1]["content"]:
+                return (
+                    "WORKER_REPORT\n"
+                    "Status: PARTIAL\n"
+                    "Objective: worker\n"
+                    "Candidates: Example\n"
+                    "Evidence: evidence [1]\n"
+                    "Checks: one clue verified\n"
+                    "Queries tried: one query\n"
+                    "Unresolved: one clue\n"
+                    "Recommended next action: verify the missing clue"
+                )
+            return "I am still investigating."
+
+        result = RecursiveAgent(
+            backend_kwargs={"model_name": "fake"},
+            system_prompt=environment.system_prompt,
+            prompt_addendum=environment.agent_prompt,
+            forced_final_prompt=environment.forced_final_prompt,
+            delegated_forced_final_prompt=environment.delegated_forced_final_prompt,
+            max_depth=1,
+            max_steps=1,
+            client_factory=FakeFactory(handler),
+        ).run("root")
+
+        child = result.trace.children[0]
+        self.assertTrue(child.forced_final_response.startswith("WORKER_REPORT"))
+        self.assertNotIn("Exact Answer:", child.forced_final_response)
+        self.assertIn("Exact Answer: Example", result.answer)
 
     def test_runtime_caps_total_direct_subagents_per_agent(self) -> None:
         from tests.fakes import FakeFactory, initial_task

@@ -1,103 +1,85 @@
-"""Task guidance for BrowseComp-Plus BM25 retrieval."""
+"""Prompt text for the BrowseComp-Plus recursive retrieval environment."""
 
 from __future__ import annotations
 
 from .dataset import BrowseCompQuery
+from ...prompts import build_browsecomp_system_prompt
 
-DEFAULT_BROWSECOMP_AGENT_PROMPT = r"""BrowseComp-Plus recursive retrieval protocol:
 
-Use only the fixed BrowseComp-Plus corpus through `search(query)`. Hits and
-reports are leads. Do not repeat another agent's query or retrieval path.
+DEFAULT_BROWSECOMP_SYSTEM_PROMPT = build_browsecomp_system_prompt()
 
-Role is determined by the initial user message: `Task:` means ROOT and
-`Delegated task:` means WORKER. ROOT owns the original question, global evidence
-state, retries, conflict resolution, and final answer. WORKER owns only its
-explicitly delegated objective.
+DEFAULT_BROWSECOMP_AGENT_PROMPT = r"""BrowseComp-Plus is an evidence-search task.
+Use only the fixed corpus through `search(query)`; do not use outside knowledge
+or hidden benchmark data.
 
-ROOT first turns the question into constraints C1, C2, ... and records their
-dependencies. Keep sequentially dependent constraints in one branch. BrowseComp
-questions are multi-constraint identity searches:
-FIRST-ACTION CONTRACT: ROOT's first model action must be a `repl` block that
-creates 2-4 strictly smaller, non-overlapping evidence branches and calls
-`spawn_subagents(requests)`. Do not write prose or call `search` first. This is
-a hard protocol gate; it applies even when the task looks sequential. ROOT
-must collect child reports before any search or answer. Keep dependencies in a branch:
-if C4 requires an entity found by C3, assign C3+C4 together. Each child has a
-strictly smaller, non-overlapping objective; never pass the original unchanged.
+The ROOT owns the original question, task decomposition, and final synthesis.
+If corpus evidence is needed, ROOT must first delegate the search: exactly one
+worker for a single coherent branch, or one worker per independent branch.
+Workers preserve useful docids and claims and return concise reports. ROOT then
+accepts a verified result, retries one worker with a narrower new lead, or
+delegates the next unresolved constraint. Do not repeat the same broad query or
+delegation, and never give multiple workers the unchanged full question. ROOT
+must not search after receiving reports; one targeted retry worker per unresolved
+branch is the maximum.
 
-Pass each child the original question, objective, leads, documents, queries,
-and exclusions. Children do not
-inherit caller messages or REPL variables. Collect reports with:
+ROOT should not call `search` itself unless supplied evidence is already enough
+and no search is needed. This keeps ROOT focused on routing, comparison, and
+synthesis rather than consuming the shared search budget.
+
+A worker may recurse only when its own search reveals multiple independent
+verification tasks. It should otherwise finish its local objective directly.
+Pass the original question, local objective, known leads, and exclusions in each
+delegation because children do not inherit the parent's history or variables.
+Use `spawn_subagent(task, context)` positionally. In every worker response,
+write only a standard ```repl``` Python block; do not wrap it in XML or another
+language fence. A worker should normally use no more than 4 distinct queries for
+one objective. Stop once a decisive docid or candidate is found; otherwise stop
+after two consecutive queries add no new useful lead and report `PARTIAL` or
+`NOT_FOUND`. Never repeat a query or use `search("docid:...")` to read a full
+document.
+
+Treat search output as document records, not text to dump immediately. Keep
+results in persistent REPL variables and use Python to filter, deduplicate,
+sort, and compare candidates. Print only bounded snippets. Inspect fuller
+content only for a small set of promising docids when it is needed to verify an
+exact claim; do not read or print every returned document by default. For
+example:
 
 ```repl
-reports = spawn_subagents(requests)
-print(reports)
+hits = search("distinctive terms")
+shortlist = [
+    h for h in hits
+    if any(word in h["snippet"].lower() for word in ["date", "school"])
+]
+print([{"docid": h["docid"], "head": h["snippet"][:300]} for h in shortlist])
 ```
 
-WORKER inspects supplied documents and leads before searching and investigates
-only its assigned objective. It may spawn children while active only when its
-local objective has at least two strictly smaller independent parts; it must
-never pass the same objective downward unchanged. It returns through `answer`
-using this compact schema:
+Workers return this compact internal format through `answer`:
 
 WORKER_REPORT
 Status: VERIFIED | PARTIAL | NOT_FOUND | CONFLICT
-Objective: <assigned objective>
+Objective: <assigned search objective>
 Candidates: <names or NONE>
-Findings: <claims, short evidence, and docids>
-Contradictions: <evidence or NONE>
-Rejected: <candidates and reasons or NONE>
-Attempted queries: <compact list>
-Unresolved: <missing facts or NONE>
-Recommended next action: <specific follow-up or NONE>
+Evidence: <claims with docids, or NONE>
+Queries tried: <compact list>
+Unresolved: <missing fact or NONE>
+Recommended next action: <targeted retry or NONE>
 
-A NOT_FOUND report lists attempted queries, rejected candidates, useful leads,
-and the missing fact. Once a worker returns, ROOT owns any retry. First merge
-reports into the evidence matrix. The search budget is not a target: do at most
-two root follow-up searches, only for remaining gaps, or delegate one narrower
-retry with a new lead. Do not repeat the delegation unchanged; avoid worker
-query families. If no
-new lead appears, mark the path MISSING and stop.
+Only ROOT returns the benchmark answer, after checking decisive evidence, with
+exactly these three lines:
 
-ROOT merges reports into a candidate-by-constraint evidence matrix. Mark each
-cell VERIFIED, PARTIAL, CONTRADICTED, or MISSING and attach docids. Do not vote
-or average worker confidence. Resolve disagreement by inspecting evidence or by
-one targeted adjudication task. Search only remaining gaps, then select the
-candidate with the strongest cross-constraint support. Explicitly calculate
-date, numeric, ordering, and geographic relations.
-
-Use distinctive queries and refine them with newly discovered names,
-phrases, dates, organizations, places, or titles. Execute tools only in `repl`
-blocks. Keep results in persistent variables and print compact catalogs:
-
-```repl
-hits = search("short distinctive query")
-print([{"docid": h["docid"], "score": h.get("score"),
-        "chars": len(h["snippet"]), "head": h["snippet"][:300]}
-       for h in hits])
-```
-
-Use bounded slices; never print whole documents.
-
-Only ROOT returns the benchmark answer through `answer`, with exactly three
-newline-separated lines:
-
-Explanation: brief verified synthesis with citations such as [12345]
+Explanation: brief verified explanation with citations such as [12345]
 Exact Answer: the shortest unambiguous answer
-Confidence: 0-100%
+Confidence: 0-100%"""
 
-Use `\n` inside a quoted Python string and set `answer["ready"] = True`.
-The question and search results are the only benchmark information available;
-gold answers, labels, qrels, and evaluator data are unavailable."""
-
-DEFAULT_BROWSECOMP_TASK_TEMPLATE = """Answer this evidence-seeking question
-using the fixed BrowseComp-Plus BM25 corpus.
+DEFAULT_BROWSECOMP_TASK_TEMPLATE = """Answer this BrowseComp-Plus question using
+the fixed corpus and the available search tool.
 
 Question:
 {query}
 
-Find and verify the answer, then return the required Explanation / Exact Answer /
-Confidence format without adding other sections."""
+Decide whether the evidence work is direct or has independent branches. Search,
+verify, and return the required three-line format."""
 
 DEFAULT_BROWSECOMP_FORCED_FINAL_PROMPT = """FINAL FORMAT OVERRIDE. Replace your
 entire previous response now. No reasoning, prose, Markdown, code, tools, or
@@ -109,6 +91,19 @@ Exact Answer: the shortest unambiguous answer
 Confidence: 0-100%
 
 Do not add any other characters or lines."""
+
+DEFAULT_BROWSECOMP_WORKER_FORCED_FINAL_PROMPT = """No working steps remain.
+You are a BrowseComp-Plus worker. Return only a compact report supported by
+evidence already observed, not the root three-line answer:
+
+WORKER_REPORT
+Status: VERIFIED | PARTIAL | NOT_FOUND | CONFLICT
+Objective: <assigned search objective>
+Candidates: <names or NONE>
+Evidence: <claims with docids, or NONE>
+Queries tried: <compact list>
+Unresolved: <missing fact or NONE>
+Recommended next action: <targeted retry or NONE>"""
 
 
 def build_browsecomp_task_prompt(
@@ -122,8 +117,10 @@ def build_browsecomp_task_prompt(
 
 
 __all__ = [
+    "DEFAULT_BROWSECOMP_SYSTEM_PROMPT",
     "DEFAULT_BROWSECOMP_AGENT_PROMPT",
     "DEFAULT_BROWSECOMP_TASK_TEMPLATE",
     "DEFAULT_BROWSECOMP_FORCED_FINAL_PROMPT",
+    "DEFAULT_BROWSECOMP_WORKER_FORCED_FINAL_PROMPT",
     "build_browsecomp_task_prompt",
 ]

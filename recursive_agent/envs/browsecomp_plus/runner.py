@@ -33,8 +33,10 @@ def main() -> None:
     output_dir = Path(args.output_dir).expanduser().resolve()
     runs_dir = output_dir / "runs"
     trajectories_dir = output_dir / "trajectories"
+    logs_dir = output_dir / "logs"
     runs_dir.mkdir(parents=True, exist_ok=True)
     trajectories_dir.mkdir(parents=True, exist_ok=True)
+    logs_dir.mkdir(parents=True, exist_ok=True)
 
     selected_ids = _parse_query_ids(args.query_ids)
     queries = load_queries(
@@ -74,6 +76,7 @@ def main() -> None:
                 model_metadata,
                 runs_dir,
                 trajectories_dir,
+                logs_dir,
             )
     else:
         with ThreadPoolExecutor(
@@ -89,6 +92,7 @@ def main() -> None:
                     model_metadata,
                     runs_dir,
                     trajectories_dir,
+                    logs_dir,
                 ): sample
                 for sample in pending
             }
@@ -145,6 +149,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--judge-max-tokens", type=int, default=512)
     parser.add_argument("--judge-timeout", type=float, default=None)
     parser.add_argument("--judge-attempts", type=int, default=3)
+    parser.add_argument(
+        "--model-name",
+        default=None,
+        help="Override the API model name from the selected config.",
+    )
     parser.add_argument("--skip-local-evaluator", action="store_true")
     return parser
 
@@ -180,12 +189,14 @@ def _run_and_persist(
     model_metadata: dict[str, Any],
     runs_dir: Path,
     trajectories_dir: Path,
+    logs_dir: Path,
 ) -> dict[str, Any]:
     started = time.time()
     run_path = runs_dir / _run_filename(sample.query_id)
     trajectory_path = trajectories_dir / (
         Path(_run_filename(sample.query_id)).stem + "_trajectory.json"
     )
+    trace_payload: dict[str, Any] | None = None
     environment = BrowseCompPlusEnvironment(
         sample=sample,
         bm25_url=args.bm25_url,
@@ -215,6 +226,7 @@ def _run_and_persist(
         )
         output = str(run.agent_result.answer or "").strip()
         full_trace = run.to_trace_dict()
+        trace_payload = full_trace
         stats = analyze_recursive_trace(
             (full_trace.get("agent_result") or {}).get("trace")
         )
@@ -278,6 +290,11 @@ def _run_and_persist(
             stats=stats,
         )
     _write_json(run_path, record)
+    _write_simple_run_log(
+        logs_dir / (Path(_run_filename(sample.query_id)).stem + ".log"),
+        record,
+        trace_payload,
+    )
     parsed = parse_final_output(record.get("final_answer", ""))
     print(
         f"query_id={sample.query_id} status={record['status']} "
@@ -288,6 +305,102 @@ def _run_and_persist(
         flush=True,
     )
     return record
+
+
+def _write_simple_run_log(
+    path: Path,
+    record: dict[str, Any],
+    trace_payload: dict[str, Any] | None,
+) -> None:
+    """Write a compact human-readable summary for one completed episode."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    report = trace_payload.get("environment_report", {}) if trace_payload else {}
+    events = report.get("events") or report.get("search_events") or []
+    trace = (trace_payload or {}).get("agent_result", {}).get("trace")
+    agents = list(_walk_trace_agents(trace))
+    searches = [str(item.get("query", "")).strip() for item in events]
+    searches = [item for item in searches if item]
+    lines = [
+        f"Query: {record.get('query_id', '')}",
+        f"Status: {record.get('status', '')}",
+        f"Question: {_one_line(record.get('query', ''), 500)}",
+        f"Answer: {_one_line(record.get('final_answer', ''), 300)}",
+        (
+            "Stats: "
+            f"searches={record.get('search_calls', 0)} "
+            f"subagents={record.get('subagent_count', 0)} "
+            f"max_depth={record.get('max_depth_reached', 0)}"
+        ),
+        "Search queries:",
+    ]
+    if searches:
+        lines.extend(f"- {index}. {_one_line(query, 260)}" for index, query in enumerate(searches, 1))
+    else:
+        lines.append("- none")
+    lines.append("Operations:")
+    if agents:
+        for agent in agents:
+            role = "root" if agent.get("parent_id") is None else f"worker depth={agent.get('depth', 0)}"
+            calls = _trace_call_names(agent)
+            first = _first_model_action(agent)
+            action = ", ".join(calls) if calls else "no REPL calls"
+            if first:
+                action += f"; first response: {_one_line(first, 220)}"
+            lines.append(f"- {role}: {action}")
+    else:
+        lines.append("- trace unavailable")
+    lines.append(f"Summary: {_run_summary(record, agents)}")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _walk_trace_agents(trace: Any) -> Iterable[dict[str, Any]]:
+    if not isinstance(trace, dict):
+        return
+    yield trace
+    for child in trace.get("children") or []:
+        yield from _walk_trace_agents(child)
+
+
+def _trace_call_names(agent: dict[str, Any]) -> list[str]:
+    calls: list[str] = []
+    for step in agent.get("steps") or []:
+        for execution in step.get("code_executions") or []:
+            try:
+                tree = ast.parse(str(execution.get("code", "")))
+            except SyntaxError:
+                continue
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                    if node.func.id not in calls:
+                        calls.append(node.func.id)
+    return calls
+
+
+def _first_model_action(agent: dict[str, Any]) -> str:
+    for step in agent.get("steps") or []:
+        response = str(step.get("response", "")).strip()
+        if response:
+            return response.split("```", 1)[0].strip()
+    return ""
+
+
+def _one_line(value: Any, limit: int) -> str:
+    text = " ".join(str(value or "").split())
+    return text if len(text) <= limit else text[: limit - 3] + "..."
+
+
+def _run_summary(record: dict[str, Any], agents: list[dict[str, Any]]) -> str:
+    status = str(record.get("status", "unknown"))
+    searches = int(record.get("search_calls", 0) or 0)
+    children = int(record.get("subagent_count", 0) or 0)
+    if status != "completed":
+        return f"episode {status}; searches={searches}, subagents={children}."
+    if children:
+        return (
+            f"root used {searches} corpus searches and delegated to {children} "
+            f"agent(s); inspect worker reports for evidence coverage."
+        )
+    return f"root solved directly with {searches} corpus searches and no delegation."
 
 
 def _completed_record(
@@ -562,6 +675,8 @@ def _model_overrides(args: argparse.Namespace) -> dict[str, Any]:
         if value is not None
     }
     overrides: dict[str, Any] = {}
+    if args.model_name is not None:
+        overrides["model_name"] = args.model_name
     if args.request_timeout is not None:
         overrides["timeout"] = args.request_timeout
     if sampling:

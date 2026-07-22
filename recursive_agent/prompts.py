@@ -138,6 +138,49 @@ continue using your own reasoning and available tools.
 """
 
 
+BROWSECOMP_TASK_ROUTING_PROMPT = """## Task routing
+
+For BrowseComp-Plus, decide whether the task is DIRECT or DECOMPOSE before
+acting. This is a local decision; not every task should recurse.
+
+If corpus evidence is needed, the root MUST delegate before any search call.
+Its first REPL block must call `spawn_subagent` or `spawn_subagents`. This is a
+search-ownership rule, not a requirement for workers to recurse.
+
+1. DIRECT: one coherent evidence chain or a narrow delegated objective. Create
+   exactly one worker with the single search objective, then synthesize its
+   report. Do not make the root perform corpus search.
+
+2. DECOMPOSE: two or more independent searchable constraints or branches. In
+   the first REPL block, create 2-4 narrower, non-overlapping search requests
+   and call `spawn_subagents(requests)`. Each request must investigate one
+   distinct constraint and include the original question, its exact objective,
+   useful leads, and exclusions. Never send the unchanged full question to
+   multiple workers.
+
+The root coordinates rather than searching. After reports arrive, choose among:
+accept a verified branch, assign a narrower retry with a new lead, or assign the
+next unresolved constraint. All corpus-search and verification work belongs to
+workers; the root synthesizes their evidence. After reports arrive, the root
+must not write or execute a `search(...)` call. It may make at most one targeted
+retry per unresolved branch by creating a new worker, then must synthesize the
+available evidence. If the root already has sufficient supplied evidence, it
+may synthesize directly without spawning a search worker.
+
+A worker follows the same rule for its own objective. Search using only a plain
+```repl``` code block containing Python; do not emit XML tags or nest another
+```python``` fence inside it. After searching, it should report when the
+objective is resolved. If it has multiple independent unresolved verification
+tasks, it may recursively delegate them; each child task must be narrower than
+its parent. Otherwise, do not recurse. Every worker returns a concise
+self-contained report through `answer`. For one objective, use at most 4
+distinct search calls before reporting `PARTIAL` or `NOT_FOUND`. Stop earlier
+when a decisive document or candidate lead is found. Do not repeat a query,
+search a docid as if it were a document-reading API, or continue paraphrasing
+after two searches produced no new useful lead.
+"""
+
+
 
 FORCED_FINAL_USER = """No working steps remain. Return the best final answer now as plain text.
 Do not use the REPL, tools, or subagents."""
@@ -147,13 +190,22 @@ def build_system_prompt(
     formatted_tools: str | None,
     *,
     prompt_addendum: str | None = None,
+    base_prompt: str | None = None,
 ) -> str:
-    sections = [SYSTEM_PROMPT]
+    sections = [str(base_prompt).strip() if base_prompt else SYSTEM_PROMPT]
     if prompt_addendum:
         sections.append(str(prompt_addendum).strip())
     if formatted_tools:
         sections.append(f"Custom tools:\n{formatted_tools}")
     return "\n\n".join(section for section in sections if section)
+
+
+def build_browsecomp_system_prompt() -> str:
+    """Keep the common system prompt and replace only its routing policy."""
+    prefix, marker, _ = SYSTEM_PROMPT.partition("\n## Task routing")
+    if not marker:
+        raise RuntimeError("SYSTEM_PROMPT is missing its task routing section")
+    return f"{prefix.rstrip()}\n\n{BROWSECOMP_TASK_ROUTING_PROMPT.strip()}"
 
 
 def build_initial_user(task: str, *, delegated: bool = False) -> str:

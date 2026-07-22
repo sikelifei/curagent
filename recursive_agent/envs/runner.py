@@ -56,6 +56,9 @@ def run_environment(
         "tools",
         "termination_check",
         "prompt_addendum",
+        "system_prompt",
+        "forced_final_prompt",
+        "delegated_forced_final_prompt",
         "disabled_repl_builtins",
     } & set(kwargs)
     if conflicts:
@@ -74,7 +77,9 @@ def run_environment(
             tools=tools,
             termination_check=environment.status,
             prompt_addendum=environment.agent_prompt,
+            system_prompt=environment.system_prompt,
             forced_final_prompt=environment.forced_final_prompt,
+            delegated_forced_final_prompt=environment.delegated_forced_final_prompt,
             disabled_repl_builtins=environment.disabled_repl_builtins,
             **kwargs,
         )
