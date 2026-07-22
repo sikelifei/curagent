@@ -37,8 +37,12 @@ the fixed corpus and the available search tool.
 Question:
 {query}
 
-Return the required three-line format after the root has collected worker
-reports."""
+ROOT ACTION CONTRACT: Your next response must be exactly one `repl` code block,
+not an explanation and not a final answer. In that block, create one focused
+worker request for a coherent search branch, or 2-4 requests for independent
+constraints, then call `spawn_subagent(...)` or `spawn_subagents(...)` and print
+the returned reports. Do not call `search` in the root. Return the required
+three-line format only after worker reports are available."""
 
 DEFAULT_BROWSECOMP_FORCED_FINAL_PROMPT = """FINAL FORMAT OVERRIDE. Replace your
 entire previous response now. No reasoning, prose, Markdown, code, tools, or

@@ -113,9 +113,7 @@ class RecursiveAgent:
         max_observation_chars: int | None = 8000,
         termination_check: TerminationCheck | None = None,
         prompt_addendum: str | None = None,
-        delegated_prompt_addendum: str | None = None,
         system_prompt: str | None = None,
-        delegated_system_prompt: str | None = None,
         forced_final_prompt: str | None = None,
         delegated_forced_final_prompt: str | None = None,
         disabled_repl_builtins: frozenset[str] | set[str] | None = None,
@@ -135,18 +133,8 @@ class RecursiveAgent:
         self._tool_values = tool_values(self._tools)
         self._formatted_tools = format_tools_for_prompt(self._tools)
         self._prompt_addendum = str(prompt_addendum).strip() if prompt_addendum else None
-        self._delegated_prompt_addendum = (
-            str(delegated_prompt_addendum).strip()
-            if delegated_prompt_addendum
-            else self._prompt_addendum
-        )
         self._system_prompt_override = (
             str(system_prompt).strip() if system_prompt else None
-        )
-        self._delegated_system_prompt_override = (
-            str(delegated_system_prompt).strip()
-            if delegated_system_prompt
-            else self._system_prompt_override
         )
         self._forced_final_prompt = (
             str(forced_final_prompt).strip() if forced_final_prompt else None
@@ -237,16 +225,8 @@ class RecursiveAgent:
         client = self._make_client()
         system_prompt = build_system_prompt(
             self._formatted_tools,
-            prompt_addendum=(
-                self._delegated_prompt_addendum
-                if parent_trace is not None
-                else self._prompt_addendum
-            ),
-            base_prompt=(
-                self._delegated_system_prompt_override
-                if parent_trace is not None
-                else self._system_prompt_override
-            ),
+            prompt_addendum=self._prompt_addendum,
+            base_prompt=self._system_prompt_override,
         )
         trace.system_prompt = system_prompt
         messages: list[dict[str, str]] = [

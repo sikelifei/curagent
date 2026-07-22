@@ -199,9 +199,7 @@ class BrowseCompPlusEnvironmentTests(unittest.TestCase):
             backend_kwargs={"model_name": "unused"},
             tools=environment.tools(),
             prompt_addendum=environment.agent_prompt,
-            delegated_prompt_addendum=environment.delegated_agent_prompt,
             system_prompt=environment.system_prompt,
-            delegated_system_prompt=environment.delegated_system_prompt,
             delegated_forced_final_prompt=environment.delegated_forced_final_prompt,
             disabled_repl_builtins=environment.disabled_repl_builtins,
             max_depth=1,
@@ -216,19 +214,12 @@ class BrowseCompPlusEnvironmentTests(unittest.TestCase):
         self.assertTrue(stats["root_used_search"])
         self.assertTrue(stats["subagent_used_search"])
         system_prompt = result.trace.system_prompt
-        worker_prompt = result.trace.children[0].system_prompt
-        self.assertNotEqual(worker_prompt, system_prompt)
-        self.assertIn("BrowseComp root role", system_prompt)
-        self.assertIn("BrowseComp worker role", worker_prompt)
-        self.assertIn("at most 4 distinct", worker_prompt)
-        self.assertNotIn("You are the ROOT coordinator", worker_prompt)
+        self.assertEqual(result.trace.children[0].system_prompt, system_prompt)
+        self.assertIn("BrowseComp-Plus", system_prompt)
         self.assertIn("You are a general recursive agent", system_prompt)
         normalized_prompt = " ".join(environment.agent_prompt.split())
-        self.assertIn("BrowseComp root addendum", normalized_prompt)
         self.assertIn("original question", normalized_prompt)
-        self.assertIn("BrowseComp worker addendum", environment.delegated_agent_prompt)
-        self.assertIn("REPL variables", environment.delegated_agent_prompt)
-        self.assertIn("WORKER_REPORT", environment.delegated_agent_prompt)
+        self.assertIn("worker", normalized_prompt)
         self.assertIn("Explanation / Exact Answer / Confidence", environment.agent_prompt)
         self.assertLess(len(environment.agent_prompt), 4000)
 
@@ -269,7 +260,7 @@ class BrowseCompPlusEnvironmentTests(unittest.TestCase):
             )
 
         self.assertIn("general recursive agent", run.system_prompt)
-        self.assertIn("BrowseComp root role", run.system_prompt)
+        self.assertIn("BrowseComp-Plus", run.system_prompt)
         self.assertEqual(run.agent_result.trace.system_prompt, run.system_prompt)
 
     def test_worker_uses_worker_specific_forced_final_prompt(self) -> None:
