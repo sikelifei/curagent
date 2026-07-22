@@ -2,59 +2,98 @@
 
 from __future__ import annotations
 
-from ...prompts import (
-    build_browsecomp_system_prompt,
-    build_browsecomp_worker_system_prompt,
-)
+from ...prompts import BROWSECOMP_TASK_ROUTING_PROMPT, SYSTEM_PROMPT
 from .dataset import BrowseCompQuery
 
 
-DEFAULT_BROWSECOMP_SYSTEM_PROMPT = build_browsecomp_system_prompt()
-DEFAULT_BROWSECOMP_WORKER_SYSTEM_PROMPT = build_browsecomp_worker_system_prompt()
+# Root and delegated agents deliberately share the same base system prompt.
+# BrowseComp-specific behavior is supplied as the environment addendum below.
+DEFAULT_BROWSECOMP_SYSTEM_PROMPT = SYSTEM_PROMPT
+DEFAULT_BROWSECOMP_WORKER_SYSTEM_PROMPT = SYSTEM_PROMPT
+DEFAULT_BROWSECOMP_AGENT_PROMPT = r"""## BrowseComp fixed-corpus policy
 
-DEFAULT_BROWSECOMP_AGENT_PROMPT = r"""BrowseComp root addendum.
-Give workers a narrow objective, useful leads, and exclusions. Compare reports,
-retry only a genuinely unresolved branch, then synthesize the answer."""
+These rules override generic task routing for this environment. Multiple clues
+about one unknown entity form one linked evidence chain; they are not independent
+merely because they are listed separately.
 
-DEFAULT_BROWSECOMP_WORKER_PROMPT = r"""BrowseComp worker addendum.
-Keep results in REPL variables, print bounded snippets, and return:
+Until a forced-final instruction, every response must contain exactly one
+executable block and no other text:
+
+```repl
+# plain Python; one action only
+```
+
+Never use <repl>, nested fences, or multiple blocks. Each turn may perform only
+one action: one search call, one spawn_subagent/spawn_subagents call, or setting
+answer. Never call search inside a loop or batch several searches. Observe the
+result before choosing the next action.
+
+Search the most discriminative linked clue first, then verify remaining clues
+against the candidate. Delegate only when at least two independent unresolved
+branches exist. Any node may delegate. Pass a narrow objective plus observed
+leads, docids, and exclusions; never pass the whole question.
+
+Use at most four distinct queries per node. Never repeat a query or use a docid
+as a query. Stop after decisive evidence or two successful searches with no new
+candidate or useful phrase.
+
+Use only snippets and docids actually observed. A failed call is ERROR, never
+NOT_FOUND. Workers return compact reports. The root verifies reports and sets
+exactly three lines: Explanation, Exact Answer, Confidence."""
+
+
+DEFAULT_BROWSECOMP_WORKER_PROMPT = r"""Return the assigned objective through
+answer["content"] using exactly:
+
 WORKER_REPORT
-Status: VERIFIED | PARTIAL | NOT_FOUND | CONFLICT
-Evidence: <claims, candidates, docids, unresolved facts>"""
+Status: VERIFIED | PARTIAL | NOT_FOUND | CONFLICT | ERROR
+Objective: <assigned objective>
+Candidates: <names or NONE>
+Evidence: <supported claims with docids, or NONE>
+Queries tried: <compact list>
+Unresolved: <missing facts or NONE>
 
-DEFAULT_BROWSECOMP_TASK_TEMPLATE = """Answer this BrowseComp-Plus question using
-the fixed corpus and the available search tool.
+Use NOT_FOUND only after successful searches. Use ERROR for tool or execution
+failure. Never include unobserved claims or docids."""
+
+
+DEFAULT_BROWSECOMP_TASK_TEMPLATE = """Answer this evidence-seeking question
+using only the fixed BrowseComp-Plus BM25 corpus.
 
 Question:
 {query}
 
-FIRST ACTION: respond with exactly one `repl` block. The root must delegate one
-linked search branch or 2-4 independent branches, print the reports, and only
-then return the three-line answer. Do not answer or describe a plan first."""
+Find a candidate from the strongest linked clues, verify the remaining criteria,
+and return exactly:
+Explanation: <brief explanation with citations>
+Exact Answer: <shortest unambiguous answer>
+Confidence: <0-100%>"""
 
-DEFAULT_BROWSECOMP_FORCED_FINAL_PROMPT = """FINAL FORMAT OVERRIDE. Replace your
-entire previous response now. No reasoning, prose, Markdown, code, tools, or
-further investigation will be executed. Return exactly three newline-separated
-lines; the first character must be E in "Explanation":
 
-Explanation: brief explanation with citations such as [12345]
-Exact Answer: the shortest unambiguous answer
-Confidence: 0-100%
+DEFAULT_BROWSECOMP_FORCED_FINAL_PROMPT = """FINAL FORMAT OVERRIDE. Return exactly
+three newline-separated lines and nothing else:
 
-Do not add any other characters or lines."""
+Explanation: <brief explanation using only observed citations>
+Exact Answer: <shortest supported answer>
+Confidence: <0-100%>
 
-DEFAULT_BROWSECOMP_WORKER_FORCED_FINAL_PROMPT = """No working steps remain.
-You are a BrowseComp-Plus worker. Return only a compact report supported by
-evidence already observed, not the root three-line answer:
+Never invent evidence or citations. If no answer is supported, return:
+Explanation: No supported answer was retrieved
+Exact Answer: Unable to determine
+Confidence: 0%"""
+
+
+DEFAULT_BROWSECOMP_WORKER_FORCED_FINAL_PROMPT = """Return only:
 
 WORKER_REPORT
-Status: VERIFIED | PARTIAL | NOT_FOUND | CONFLICT
-Objective: <assigned search objective>
+Status: VERIFIED | PARTIAL | NOT_FOUND | CONFLICT | ERROR
+Objective: <assigned objective>
 Candidates: <names or NONE>
-Evidence: <claims with docids, or NONE>
+Evidence: <observed claims with docids, or NONE>
 Queries tried: <compact list>
-Unresolved: <missing fact or NONE>
-Recommended next action: <targeted retry or NONE>"""
+Unresolved: <missing facts or NONE>
+
+NOT_FOUND requires a successful search. Tool or execution failure is ERROR."""
 
 
 def build_browsecomp_task_prompt(

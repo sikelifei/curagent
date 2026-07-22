@@ -252,6 +252,32 @@ merges their JSON reports, and only the root submits the final answer.
 `--data-path` accepts a JSON/JSONL file, one parquet file, or a downloaded
 dataset directory containing `data/validation-*.parquet`.
 
+### TextCraft-Synth recursive evaluation
+
+`textcraft_synth` implements the crafting environment described in the RAO
+paper. Each episode exposes `craft`, `get_info`, `view_inventory`, and `finish`;
+all recursive agents share the live inventory. The loader accepts JSON, JSONL,
+or parquet rows with `initial_inventory`, `recipes`, and `targets` fields. The
+paper describes the action space but does not include a canonical dataset file,
+so a deterministic local generator is used when no data path is present.
+
+Run one medium-depth generated episode with the existing DeepSeek-V4-Flash
+configuration:
+
+```bash
+python -m examples.run_textcraft_synth \
+  --config configs/model_api.local.yaml \
+  --difficulty medium \
+  --instance-id 0 \
+  --trace-json outputs/textcraft_synth_trace.json
+```
+
+Use a released or locally generated corpus by passing `--data-path` (the same
+fields are accepted in JSON and JSONL). The runner records task score,
+successful runs, craft calls, recursive child count, and maximum trace depth in
+`--summary-json` or stdout. Increase `--max-depth` for hard tasks; the default
+evaluation cap is 12, matching the paper's evaluation setting.
+
 Inspect every prompt layer without loading data or calling a model:
 
 ```bash

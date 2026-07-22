@@ -54,6 +54,16 @@ class ReplToolsConfigTests(unittest.TestCase):
             ["print(1)", "print(2)", "print(3)"],
         )
 
+    def test_repl_block_parser_accepts_python_alias(self) -> None:
+        self.assertEqual(
+            find_repl_blocks(
+                "```python\nprint(1)\n```\n"
+                "<python>print(2)</python>\n"
+                "```repl\nprint(3)\n```"
+            ),
+            ["print(1)", "print(2)", "print(3)"],
+        )
+
     def test_model_yaml_loader(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "model.yaml"

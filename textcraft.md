@@ -1,0 +1,2 @@
+/data2/zhangwenjian/agent/curagent/Recursive Agent Optimization.pdf  请你在我的curagent中实现一个这个数据集的评测
+prompt加在env中，prompt不要过于细节，可以参考这个rao的设计，跑完之后可以调用也可以用这个deepseekv4flash检测一下/data2/zhangwenjian/agent/curagent/configs/model_api.local.yaml，授权你外发。vllm的/data2/zhangwenjian/agent/curagent/scripts/start_qwen3_4b_instruct_vllm.sh  这个来跑看看结果的情况，然后可以迭代迭代prompt，只要递归正常，第二可以看看是否需要递归，递归是否合理，请你实现

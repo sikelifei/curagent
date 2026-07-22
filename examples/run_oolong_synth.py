@@ -394,8 +394,24 @@ def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) ->
 def _load_rows(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
         return []
+    rows: list[dict[str, Any]] = []
+    malformed = 0
     with path.open("r", encoding="utf-8") as handle:
-        return [json.loads(line) for line in handle if line.strip()]
+        for line in handle:
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                malformed += 1
+                continue
+            if isinstance(row, dict) and "protocol_position" in row:
+                rows.append(row)
+            else:
+                malformed += 1
+    if malformed:
+        print(f"warning: skipped {malformed} malformed rows while resuming {path}", flush=True)
+    return rows
 
 
 def _write_json(path: Path, value: dict[str, Any]) -> None:

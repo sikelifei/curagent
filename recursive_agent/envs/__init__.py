@@ -10,6 +10,7 @@ from .trace_analysis import aggregate_trace_metrics, analyze_environment_trace
 from . import browsecomp_plus as browsecomp_plus
 from . import oolong as oolong
 from . import oolong_synth as oolong_synth
+from . import textcraft_synth as textcraft_synth
 from . import webshop as webshop
 
 __all__ = [
@@ -26,5 +27,6 @@ __all__ = [
     "browsecomp_plus",
     "oolong",
     "oolong_synth",
+    "textcraft_synth",
     "webshop",
 ]
