@@ -29,13 +29,23 @@ class AgentEnvironment(ABC):
 
     @property
     def agent_prompt(self) -> str:
-        """Return environment guidance shared by root and delegated agents."""
+        """Return environment guidance for the root agent."""
         return ""
 
     @property
+    def delegated_agent_prompt(self) -> str:
+        """Return environment guidance for delegated agents."""
+        return self.agent_prompt
+
+    @property
     def system_prompt(self) -> str | None:
-        """Return an optional environment-specific base system prompt."""
+        """Return the optional root system prompt."""
         return None
+
+    @property
+    def delegated_system_prompt(self) -> str | None:
+        """Return the optional delegated-agent system prompt."""
+        return self.system_prompt
 
     @property
     def forced_final_prompt(self) -> str | None:

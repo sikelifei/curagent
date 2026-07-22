@@ -199,7 +199,9 @@ class BrowseCompPlusEnvironmentTests(unittest.TestCase):
             backend_kwargs={"model_name": "unused"},
             tools=environment.tools(),
             prompt_addendum=environment.agent_prompt,
+            delegated_prompt_addendum=environment.delegated_agent_prompt,
             system_prompt=environment.system_prompt,
+            delegated_system_prompt=environment.delegated_system_prompt,
             delegated_forced_final_prompt=environment.delegated_forced_final_prompt,
             disabled_repl_builtins=environment.disabled_repl_builtins,
             max_depth=1,
@@ -214,26 +216,20 @@ class BrowseCompPlusEnvironmentTests(unittest.TestCase):
         self.assertTrue(stats["root_used_search"])
         self.assertTrue(stats["subagent_used_search"])
         system_prompt = result.trace.system_prompt
-        self.assertEqual(result.trace.children[0].system_prompt, system_prompt)
-        self.assertIn("DIRECT or DECOMPOSE", system_prompt)
-        self.assertIn("not every task should recurse", system_prompt)
-        self.assertIn("A worker follows the same rule", system_prompt)
-        self.assertIn("single search objective", system_prompt)
-        self.assertIn("narrower than", system_prompt)
+        worker_prompt = result.trace.children[0].system_prompt
+        self.assertNotEqual(worker_prompt, system_prompt)
+        self.assertIn("BrowseComp root role", system_prompt)
+        self.assertIn("BrowseComp worker role", worker_prompt)
+        self.assertIn("at most 4 distinct", worker_prompt)
+        self.assertNotIn("You are the ROOT coordinator", worker_prompt)
         self.assertIn("You are a general recursive agent", system_prompt)
         normalized_prompt = " ".join(environment.agent_prompt.split())
-        self.assertIn("fixed corpus", environment.agent_prompt)
-        self.assertIn('hits = search(', environment.agent_prompt)
-        self.assertIn('h["snippet"][:300]', environment.agent_prompt)
-        self.assertIn("persistent REPL variables", environment.agent_prompt)
-        self.assertIn("bounded snippets", environment.agent_prompt)
-        self.assertIn("ROOT owns the original question", normalized_prompt)
-        self.assertIn("ROOT must first delegate the search", normalized_prompt)
-        self.assertIn("ROOT must first delegate the search", normalized_prompt)
-        self.assertIn("WORKER_REPORT", environment.agent_prompt)
-        self.assertIn("A worker may recurse only", normalized_prompt)
-        self.assertIn("ROOT then accepts", normalized_prompt)
-        self.assertIn("Only ROOT returns the benchmark answer", environment.agent_prompt)
+        self.assertIn("BrowseComp root addendum", normalized_prompt)
+        self.assertIn("original question", normalized_prompt)
+        self.assertIn("BrowseComp worker addendum", environment.delegated_agent_prompt)
+        self.assertIn("REPL variables", environment.delegated_agent_prompt)
+        self.assertIn("WORKER_REPORT", environment.delegated_agent_prompt)
+        self.assertIn("Explanation / Exact Answer / Confidence", environment.agent_prompt)
         self.assertLess(len(environment.agent_prompt), 4000)
 
     def test_environment_runner_uses_browsecomp_system_only(self) -> None:
@@ -273,8 +269,7 @@ class BrowseCompPlusEnvironmentTests(unittest.TestCase):
             )
 
         self.assertIn("general recursive agent", run.system_prompt)
-        self.assertIn("BrowseComp-Plus is an evidence-search task", run.system_prompt)
-        self.assertIn("single search objective", run.system_prompt)
+        self.assertIn("BrowseComp root role", run.system_prompt)
         self.assertEqual(run.agent_result.trace.system_prompt, run.system_prompt)
 
     def test_worker_uses_worker_specific_forced_final_prompt(self) -> None:

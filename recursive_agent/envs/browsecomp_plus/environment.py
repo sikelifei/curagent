@@ -10,7 +10,9 @@ from ..registry import register_environment
 from .dataset import BrowseCompQuery
 from .prompts import (
     DEFAULT_BROWSECOMP_SYSTEM_PROMPT,
+    DEFAULT_BROWSECOMP_WORKER_SYSTEM_PROMPT,
     DEFAULT_BROWSECOMP_AGENT_PROMPT,
+    DEFAULT_BROWSECOMP_WORKER_PROMPT,
     DEFAULT_BROWSECOMP_FORCED_FINAL_PROMPT,
     DEFAULT_BROWSECOMP_WORKER_FORCED_FINAL_PROMPT,
     DEFAULT_BROWSECOMP_TASK_TEMPLATE,
@@ -71,6 +73,14 @@ class BrowseCompPlusEnvironment(AgentEnvironment):
     @property
     def system_prompt(self) -> str:
         return DEFAULT_BROWSECOMP_SYSTEM_PROMPT
+
+    @property
+    def delegated_system_prompt(self) -> str:
+        return DEFAULT_BROWSECOMP_WORKER_SYSTEM_PROMPT
+
+    @property
+    def delegated_agent_prompt(self) -> str:
+        return DEFAULT_BROWSECOMP_WORKER_PROMPT
 
     @property
     def forced_final_prompt(self) -> str:
