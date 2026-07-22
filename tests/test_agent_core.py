@@ -50,6 +50,14 @@ class AgentCoreTests(unittest.TestCase):
         self.assertNotIn("TOP_SECRET_VALUE", system)
         self.assertNotIn("planner", system.lower())
         self.assertNotIn("orchestrator", system.lower())
+        self.assertIn(
+            "At any point, you may continue solving the task locally", system
+        )
+        self.assertIn(
+            "Delegate only when the expected benefit exceeds the added cost", system
+        )
+        self.assertNotIn("Classify the task before solving", system)
+        self.assertNotIn("DECOMPOSABLE", system)
         self.assertEqual(
             sum(
                 message["content"].count("unique original task")

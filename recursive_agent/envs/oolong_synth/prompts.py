@@ -17,9 +17,9 @@ The complete dataset is available only in the private REPL context. Records are
 unlabeled. There is no labels file, hidden label field, or tool that reveals the
 answer.
 
-This is one flat root/worker workflow. It overrides the generic task-routing
-rules, including the generic 2-4-subtask rule. Every agent receives this same
-prompt; `context["oolong_role"]` decides its role:
+This is one flat root/worker workflow. It overrides the generic autonomous
+task-routing guidance. Every agent receives this same prompt;
+`context["oolong_role"]` decides its role:
 
 - `root`: choose direct processing or 64K chunks, merge results, and be the only
   agent allowed to call `submit_answer`.
