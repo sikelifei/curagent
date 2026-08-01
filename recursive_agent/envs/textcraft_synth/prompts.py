@@ -36,31 +36,61 @@ from __future__ import annotations
 
 DEFAULT_TEXTCRAFT_AGENT_PROMPT = """TextCraft-Synth guidance:
 
-You are crafting additional requested quantities from a shared inventory. Use
-`view_inventory()` and `get_info(items)` before planning. Record the initial
-count of each target: the required final count is its initial count plus the
-requested amount.
+You are crafting additional requested quantities from one shared inventory.
+Begin with `view_inventory()` and `get_info()` for the target items. Record the
+initial count of each target; success requires initial count plus requested
+count.
 
-A recipe's output and ingredient counts are per execution. `craft` takes the
-total output quantity, which must be divisible by the recipe's `result_count`.
-Scale ingredient counts by the required number of recipe executions, rounding
-the output quantity up to a valid multiple when necessary.
+Your first response must be exactly one executable `repl` block such as:
 
-For crafting depth 0-3, prefer solving directly. For depth 4 or more, if the
-target has two or more substantial independent direct branches, delegate those
-intermediate item/count pairs using `spawn_subagent` or `spawn_subagents` and
-reserve final assembly for yourself. Branches are independent only when they
-do not depend on each other or compete for the same limited ingredients.
-Otherwise keep the work serial.
+```repl
+inventory = view_inventory()
+info = get_info()
+print(inventory)
+print(info)
+```
 
-Delegated agents share the live inventory and may recurse when their own task
-is still deep and branching. A child assigned an intermediate group should
-return a report to its caller and should not finish the whole episode.
+Every later working response must use one `repl` block. Print every tool
+return value. Never infer an empty result from an unprinted return value, never
+use guessed ingredients, and never use a `python` fence or bare tool call.
 
-After delegation, check the inventory again, craft any remaining items, and
-assemble the final targets yourself. Call `finish(message)` only after verifying
-that every target's final count is at least its initial count plus the requested
-amount."""
+Plan the dependency graph before crafting. Recipe ingredient counts are per
+execution, and `craft` requires exact scaled counts with output divisible by
+`result_count`. Round output up only when extra output is allowed. Prefer the
+shortest verified dependency path.
+
+Keep planning short: after the initial inventory and target recipe inspection,
+inspect only the missing dependency recipes needed for the plan. Then execute
+verified independent crafts in one `repl` block with several exact
+`print(craft(...))` calls when possible. Do not spend one model turn per craft;
+reserve at least two turns for final inventory verification and `finish`.
+
+Choose direct work when the next dependency chain is short, sequential, or
+shares scarce ingredients. Delegate a distinct intermediate branch only when
+the expected benefit exceeds coordination cost. The request must assign exact
+item counts and exclusive ingredients, state whether the child should only plan
+or may craft, and reserve final assembly for the root. Use parallel children
+only for branches that neither depend on each other nor compete for ingredients.
+Pass the branch target, current inventory snapshot, relevant recipes, and
+exclusions.
+
+A planning child returns required item counts, exact recipe calls, ingredient
+needs, blockers, and confidence without mutating inventory. A child explicitly
+assigned exclusive live crafting may craft only that branch, must verify the
+result, and must not call `finish`. It may recurse only by assigning a smaller
+non-overlapping branch, never the same branch unchanged. The root owns final
+assembly and the completion decision.
+
+After a child report, re-read the inventory and verify the plan against current
+resources. Execute independent exact crafts in a compact batch, then inspect
+the inventory and update remaining targets. If a batch reports an error, trust
+the latest inventory, call `get_info()` again, and do not repeat an argument
+that was already rejected or a craft that already succeeded.
+
+Reserve steps for final assembly and verification. Call `finish(message)` only
+after final inventory confirms every requested target count. If verified
+recipes and resources cannot complete a target, return the verified partial
+state instead of looping."""
 
 DEFAULT_TEXTCRAFT_TASK_TEMPLATE = """Craft the following additional items: {targets}
 

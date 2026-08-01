@@ -12,9 +12,9 @@ DEFAULT_BROWSECOMP_SYSTEM_PROMPT = SYSTEM_PROMPT
 DEFAULT_BROWSECOMP_WORKER_SYSTEM_PROMPT = SYSTEM_PROMPT
 DEFAULT_BROWSECOMP_AGENT_PROMPT = r"""## BrowseComp fixed-corpus policy
 
-These rules override generic task routing for this environment. Multiple clues
-about one unknown entity form one linked evidence chain; they are not independent
-merely because they are listed separately.
+These rules refine generic routing for this environment. Multiple clues about
+one unknown entity usually form one linked evidence chain; they are not
+independent merely because they are listed separately.
 
 Until a forced-final instruction, every response must contain exactly one
 executable block and no other text:
@@ -28,12 +28,20 @@ one action: one search call, one spawn_subagent/spawn_subagents call, or setting
 answer. Never call search inside a loop or batch several searches. Observe the
 result before choosing the next action.
 
-Search the most discriminative linked clue first, then verify remaining clues
-against the candidate. Delegate only when at least two independent unresolved
-branches exist. Any node may delegate. Pass a narrow objective plus observed
-leads, docids, and exclusions; never pass the whole question.
+Inspect the evidence state first. Before the first search, count the unresolved
+clues. For one short linked chain, local search is allowed. For two or more
+distinct discovery or verification routes, delegate those routes first so the
+root can compare reports; the root should not duplicate a child's search. Pass
+a narrow objective, observed leads, previous queries, docids, and exclusions;
+never pass the whole question unchanged.
 
-Use at most four distinct queries per node. Never repeat a query or use a docid
+A child may recurse when its assigned route exposes two genuinely different
+subchecks, and may repair its own partial route with a narrower new query before
+returning. It must not repeat an ancestor's query or delegate the same unresolved
+question. At every node, compare reports and synthesize the answer; reports are
+evidence to verify, not final truth.
+
+Use at most three distinct queries per node. Never repeat a query or use a docid
 as a query. Stop after decisive evidence or two successful searches with no new
 candidate or useful phrase.
 
@@ -83,7 +91,7 @@ Exact Answer: Unable to determine
 Confidence: 0%"""
 
 
-DEFAULT_BROWSECOMP_WORKER_FORCED_FINAL_PROMPT = """Return only:
+DEFAULT_BROWSECOMP_WORKER_FORCED_FINAL_PROMPT = """BrowseComp-Plus worker forced final. Return only:
 
 WORKER_REPORT
 Status: VERIFIED | PARTIAL | NOT_FOUND | CONFLICT | ERROR

@@ -219,7 +219,7 @@ class BrowseCompPlusEnvironmentTests(unittest.TestCase):
         self.assertIn("You are a general recursive agent", system_prompt)
         normalized_prompt = " ".join(environment.agent_prompt.split())
         self.assertIn("narrow objective", normalized_prompt)
-        self.assertIn("Compare reports", normalized_prompt)
+        self.assertIn("compare reports", normalized_prompt)
         self.assertIn("synthesize the answer", normalized_prompt)
         self.assertLess(len(environment.agent_prompt), 4000)
 

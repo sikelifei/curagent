@@ -15,6 +15,7 @@ from recursive_agent.envs import run_registered_environment
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default="configs/model_api.local.yaml")
+    parser.add_argument("--model-name", default=None)
     parser.add_argument("--data-path")
     parser.add_argument("--textcraft-root")
     parser.add_argument("--split", default="test")
@@ -100,6 +101,15 @@ def _run_one(
         environment_kwargs["agent_prompt"] = prompt
 
     try:
+        model_overrides = {
+            "timeout": args.request_timeout,
+            "sampling_args": {
+                "temperature": args.temperature,
+                "max_tokens": args.max_tokens,
+            },
+        }
+        if args.model_name:
+            model_overrides["model_name"] = args.model_name
         run = run_registered_environment(
             "textcraft_synth",
             model_config=args.config,
@@ -112,13 +122,7 @@ def _run_one(
                 "max_run_seconds": args.max_run_seconds,
                 "max_observation_chars": args.max_observation_chars,
             },
-            model_overrides={
-                "timeout": args.request_timeout,
-                "sampling_args": {
-                    "temperature": args.temperature,
-                    "max_tokens": args.max_tokens,
-                },
-            },
+            model_overrides=model_overrides,
         )
         report = run.environment_report
         trace = run.to_trace_dict()

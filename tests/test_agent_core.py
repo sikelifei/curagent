@@ -56,6 +56,9 @@ class AgentCoreTests(unittest.TestCase):
         self.assertIn(
             "Delegate only when the expected benefit exceeds the added cost", system
         )
+        self.assertIn("one concrete deliverable", system)
+        self.assertIn("must not recreate an ancestor's task", system)
+        self.assertIn("Do not repeat a failed action or delegation", system)
         self.assertNotIn("Classify the task before solving", system)
         self.assertNotIn("DECOMPOSABLE", system)
         self.assertEqual(

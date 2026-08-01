@@ -132,19 +132,21 @@ class OolongSynthEnvironmentTests(unittest.TestCase):
         lengths = Counter(metadata[index]["context_len"] for index in first)
         self.assertEqual(set(lengths.values()), {15, 16})
 
-    def test_prompt_uses_single_64k_root_worker_flow(self) -> None:
-        self.assertEqual(CHUNK_CHAR_LIMIT, 65_536)
+    def test_prompt_uses_adaptive_32k_root_worker_flow(self) -> None:
+        self.assertEqual(CHUNK_CHAR_LIMIT, 32_768)
         self.assertIn('context["oolong_role"]', DEFAULT_SYNTH_AGENT_PROMPT)
         self.assertIn('source = context["context_window_text"]', DEFAULT_SYNTH_AGENT_PROMPT)
         self.assertIn('"context_chars": len(source)', DEFAULT_SYNTH_AGENT_PROMPT)
         self.assertIn("context_chars` measured above", DEFAULT_SYNTH_AGENT_PROMPT)
-        self.assertIn("greater than 65,536", DEFAULT_SYNTH_AGENT_PROMPT)
+        self.assertIn("larger than 32,768", DEFAULT_SYNTH_AGENT_PROMPT)
         self.assertIn("record boundaries", DEFAULT_SYNTH_AGENT_PROMPT)
-        self.assertIn("process the complete task in the root", DEFAULT_SYNTH_AGENT_PROMPT)
-        self.assertIn("Send the chunks with `spawn_subagents`", DEFAULT_SYNTH_AGENT_PROMPT)
+        self.assertIn("Process locally in bounded pages", DEFAULT_SYNTH_AGENT_PROMPT)
+        self.assertIn("Choose local processing", DEFAULT_SYNTH_AGENT_PROMPT)
+        self.assertIn("`spawn_subagent` for one useful chunk", DEFAULT_SYNTH_AGENT_PROMPT)
         self.assertIn("expected_rows", DEFAULT_SYNTH_AGENT_PROMPT)
         self.assertIn("must never spawn another agent", DEFAULT_SYNTH_AGENT_PROMPT)
         self.assertIn("Only the root submits", DEFAULT_SYNTH_AGENT_PROMPT)
+        self.assertIn("same rows twice", DEFAULT_SYNTH_AGENT_PROMPT)
         self.assertNotIn("adaptive_flat", DEFAULT_SYNTH_AGENT_PROMPT)
         self.assertNotIn("hierarchical", DEFAULT_SYNTH_AGENT_PROMPT)
         blocks = DEFAULT_SYNTH_AGENT_PROMPT.split("```repl\n")[1:]

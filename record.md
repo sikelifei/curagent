@@ -152,3 +152,26 @@ WebShop prompt/tool interface：明确 `search[keywords]` 是模板，必须替�
   observation truncation episode/次数统计。
 - `python -m unittest discover -q`：30 项测试通过。
  
+
+
+
+
+
+
+
+• 最近一个仍使用 DIRECT / DECOMPOSABLE system prompt 的完整版本是：
+
+  4d6256b34877453f1d644841408eff7d2d973d8a
+  提交信息：Save current agent implementation
+  时间：2026-07-23 00:11:52
+
+  随后 340aeb7 才把 prompt 改为模型自主决定是否递归。因此需要旧 prompt 版本时，应使用 4d6256b。
+
+
+
+
+
+
+
+
+ python -u -m examples.run_webshop_batch --config configs/model_api.local.yaml --recode-root /data2/zhangwenjian/agent/ReCode --split test --start-index 0 --count 200 --concurrency 8 --seed 233 --env-max-steps 25 --agent-max-steps 25 --max-depth 2 --max-concurrent-subagents 4 --max-run-seconds 300 --trace-jsonl outputs/webshop_200_prompt_v3_traces_dsv31.jsonl --summary-json outputs/webshop_200_prompt_v3_traces_dsv31.json

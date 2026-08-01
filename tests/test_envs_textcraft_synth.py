@@ -46,10 +46,12 @@ class TextCraftSynthEnvironmentTests(unittest.TestCase):
             self.assertEqual(dataset[0].sample_id, "tiny-0")
             environment = TextCraftSynthEnvironment(data_path=path)
         self.assertIn("textcraft_synth", available_environments())
-        self.assertEqual(environment.task, "Craft the following items: 1x tool\n\nUse the registered crafting tools to complete the task. The environment is\nfinished only after you call `finish(...)`.")
+        self.assertEqual(environment.task, "Craft the following additional items: 1x tool\n\nUse the registered crafting tools to complete the task. The environment is\nfinished only after you call `finish(...)`.")
         self.assertIn("shared inventory", DEFAULT_TEXTCRAFT_AGENT_PROMPT)
-        self.assertIn("depth 4", DEFAULT_TEXTCRAFT_AGENT_PROMPT)
-        self.assertIn("reserve the final assembly", DEFAULT_TEXTCRAFT_AGENT_PROMPT)
+        self.assertIn("Choose direct work", DEFAULT_TEXTCRAFT_AGENT_PROMPT)
+        self.assertIn("exclusive ingredients", DEFAULT_TEXTCRAFT_AGENT_PROMPT)
+        self.assertIn("root owns final", DEFAULT_TEXTCRAFT_AGENT_PROMPT)
+        self.assertNotIn("depth 4", DEFAULT_TEXTCRAFT_AGENT_PROMPT)
 
     def test_fixed_output_and_existing_target_semantics(self) -> None:
         row = sample_row()
@@ -95,7 +97,7 @@ class TextCraftSynthEnvironmentTests(unittest.TestCase):
         def handler(messages, _timeout):
             task = initial_task(messages)
             assistant_calls = sum(message["role"] == "assistant" for message in messages)
-            if task.startswith("Craft the following items:"):
+            if task.startswith("Craft the following additional items:"):
                 if assistant_calls == 0:
                     return (
                         "```repl\n"

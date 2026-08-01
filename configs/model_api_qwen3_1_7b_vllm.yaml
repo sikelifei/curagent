@@ -1,0 +1,13 @@
+model:
+  type: api
+  api:
+    api_key: "local-vllm"
+    base_url: "http://127.0.0.1:56782/v1"
+    model: /data2/zhangwenjian/model/Qwen3-1.7B
+    temperature: 0.7
+    max_tokens: 2048
+    timeout: 120
+    sampling_args:
+      extra_body:
+        chat_template_kwargs:
+          enable_thinking: false

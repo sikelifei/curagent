@@ -12,6 +12,7 @@ from recursive_agent.envs import run_registered_environment
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="configs/model_api.local.yaml")
+    parser.add_argument("--model-name", default=None)
     parser.add_argument("--recode-root", default=None)
     parser.add_argument("--split", choices=("train", "test"), default="test")
     parser.add_argument("--instance-id", type=int, default=0)
@@ -44,6 +45,9 @@ def main() -> None:
             encoding="utf-8"
         )
 
+    model_overrides = {}
+    if args.model_name:
+        model_overrides["model_name"] = args.model_name
     run = run_registered_environment(
         "webshop",
         model_config=args.config,
@@ -55,6 +59,7 @@ def main() -> None:
             "max_run_seconds": args.max_run_seconds,
             "max_observation_chars": args.max_observation_chars,
         },
+        model_overrides=model_overrides,
     )
     if args.trace_file:
         trace_path = Path(args.trace_file)

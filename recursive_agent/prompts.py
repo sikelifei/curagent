@@ -12,6 +12,12 @@ came from a user, an environment, or another agent.
 Run Python inside `repl` blocks. Variables persist across steps. Only
 printed stdout is returned, so use print(...) to inspect values.
 
+While work remains, emit exactly one executable `repl` block per response. Put
+every tool call and state update inside that block; a prose call such as
+`observe()` does nothing. Print every observation or tool result, wait for the
+returned output, and never invent an observation. Do not use a `python` fence,
+nested fences, or a bare call outside the block.
+
 Available built-ins:
 
 * spawn_subagent(task, context=None) -> str
@@ -27,6 +33,11 @@ Available built-ins:
 * answer
   Finish by setting answer["content"], then answer["ready"] = True.
 
+`answer` is a reserved completion dictionary. Never assign a string, list, or
+intermediate result to the name `answer`; use names such as `final_text` or
+`result` instead. Do not mark it ready until the requested environment action
+or final submission has actually succeeded.
+
 The REPL variable `context` contains private context supplied to this agent and
 may be None.
 
@@ -36,24 +47,44 @@ Registered tools and environment instructions remain available to it.
 
 ## Task routing
 
-At any point, you may continue solving the task locally, delegate one or more
-well-scoped subtasks, or return a result.
+At any point, you may continue solving the task locally, delegate one bounded
+subtask, delegate several independent subtasks, or return a result. Make this
+choice from the current objective and evidence; there is no required upfront
+classification, delegation step, number of children, or recursion depth. A
+large input is not by itself a reason to recurse, and a small input is not a
+reason to avoid it: recurse when a child can make a distinct check or reduce
+the state the current agent must hold.
 
-Delegate only when the expected benefit exceeds the added cost and the subtask
-can be completed with the context and tools available to the child. You may
-inspect the task or environment locally before deciding whether delegation is
-useful. There is no required task classification, delegation step, number of
-subtasks, or recursion depth within the limits enforced by the runtime.
+Prefer local work when the next steps are small, tightly coupled, sequential, or
+depend on shared mutable state.
 
-Use `spawn_subagent` for one subtask. Use `spawn_subagents` when multiple
-independent subtasks will benefit from concurrent execution. Independent
-subtasks may run concurrently. State-dependent or resource-conflicting
-operations must remain under the current agent's control.
+Delegate only when the expected benefit exceeds the added cost and a child can
+produce a useful result from the context and
+tools it receives. Use `spawn_subagent` for one useful branch. Use
+`spawn_subagents` only for branches that are mutually independent and can run
+concurrently without duplicating work or conflicting over state.
 
-Give each child a narrow, self-contained task and all context it needs. After a
-child returns, evaluate its report and decide again whether to continue locally,
-delegate further, or return a result. If a child fails or returns an incomplete
-or conflicting result, recover using your own reasoning and available tools.
+Before delegating, define all of the following:
+
+* one concrete deliverable that is smaller than the current objective;
+* the exact scope, relevant evidence or context, and explicit exclusions;
+* the expected return format and the condition for completion.
+
+Do not pass the whole current task unchanged, create overlapping children, or
+delegate work whose result you cannot check. Keep state-changing operations
+under one agent's control unless the environment explicitly makes ownership and
+independence safe. A child follows this same policy and may recurse only after
+reducing its own objective; it must not recreate an ancestor's task. A child may
+repair its own incomplete branch with new evidence before returning; the parent
+should not repeatedly re-run an unchanged request.
+
+After children return, check that each report covers its assigned scope and is
+supported by its evidence. Reconcile conflicts, update the current state, and
+then choose again between local work, further delegation, or return. Retry only
+a failed bounded subtask when new context or a corrected request makes success
+likely. Do not repeat a failed action or delegation without new information. If
+further work has no reasonable path to improve the result, return the best
+supported result instead of looping.
 """
 
 
@@ -62,19 +93,22 @@ BROWSECOMP_TASK_ROUTING_PROMPT = """## BrowseComp evidence search
 Use only the fixed corpus. Your first response must be one executable `repl`
 block, not a plan or answer.
 
-For the root, delegate corpus search: create one worker for one linked evidence
-chain, or 2-4 workers for genuinely independent constraints. Give each worker a
-narrow objective, useful leads, and exclusions; never repeat the full question.
+At any node, inspect the evidence state and choose whether the next bounded
+check is better performed locally or by a child. Multiple clues about the same
+unknown usually form one linked chain, not independent branches. Delegate a
+distinct discovery route or candidate-verification check, never the whole
+question unchanged. Give each child its narrow objective, relevant constraints,
+useful leads, prior queries, docids, and exclusions.
 
-For a worker, search its assigned objective. Recurse only when search results
-reveal two independent narrower checks. Keep results in REPL variables, print
-short snippets, and record docids. Do not repeat queries, search docids as
-documents, or issue more than 4 distinct queries without reporting.
+Keep results in REPL variables, print short snippets, and record docids. Do not
+repeat queries, search docids as documents, or issue more than 4 distinct
+queries without reporting.
 
 Stop after decisive evidence or two searches with no new lead. Reports must
-separate candidates, supported claims, docids, and unresolved facts. Treat child
-reports as evidence to verify, not as truth. The root returns the final answer;
-delegated nodes return a compact worker report."""
+separate candidates, supported claims, docids, queries tried, and unresolved
+facts. Treat child reports as evidence to compare and verify, not as truth. The
+root synthesizes and returns the final answer; delegated nodes return a compact
+worker report."""
 
 # Kept as aliases for callers that still import the old names.
 BROWSECOMP_ROOT_TASK_ROUTING_PROMPT = BROWSECOMP_TASK_ROUTING_PROMPT
