@@ -151,7 +151,7 @@ class OolongEnvironmentTests(unittest.TestCase):
         self.assertIn("Oolong-real environment guidance", run.system_prompt)
         self.assertIn("chunk_text", run.system_prompt)
         self.assertIn("spawn_subagents", run.system_prompt)
-        self.assertIn("general recursive agent", run.system_prompt)
+        self.assertIn("recursive agent harness", run.system_prompt)
         first_execution = run.to_trace_dict()["agent_result"]["trace"]["steps"][0][
             "code_executions"
         ][0]

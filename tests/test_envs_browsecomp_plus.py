@@ -216,11 +216,11 @@ class BrowseCompPlusEnvironmentTests(unittest.TestCase):
         system_prompt = result.trace.system_prompt
         self.assertEqual(result.trace.children[0].system_prompt, system_prompt)
         self.assertIn("BrowseComp-Plus", system_prompt)
-        self.assertIn("You are a general recursive agent", system_prompt)
+        self.assertIn("You are a recursive agent harness", system_prompt)
         normalized_prompt = " ".join(environment.agent_prompt.split())
         self.assertIn("narrow objective", normalized_prompt)
-        self.assertIn("Compare reports", normalized_prompt)
-        self.assertIn("synthesize the answer", normalized_prompt)
+        self.assertIn("The root verifies reports", normalized_prompt)
+        self.assertIn("sets exactly three lines", normalized_prompt)
         self.assertLess(len(environment.agent_prompt), 4000)
 
     def test_environment_runner_uses_browsecomp_system_only(self) -> None:
@@ -259,7 +259,7 @@ class BrowseCompPlusEnvironmentTests(unittest.TestCase):
                 },
             )
 
-        self.assertIn("general recursive agent", run.system_prompt)
+        self.assertIn("recursive agent harness", run.system_prompt)
         self.assertIn("BrowseComp-Plus", run.system_prompt)
         self.assertEqual(run.agent_result.trace.system_prompt, run.system_prompt)
 
@@ -285,7 +285,7 @@ class BrowseCompPlusEnvironmentTests(unittest.TestCase):
                     "print(report)\n"
                     "```"
                 )
-            if "BrowseComp-Plus worker" in messages[-1]["content"]:
+            if "WORKER_REPORT" in messages[-1]["content"]:
                 return (
                     "WORKER_REPORT\n"
                     "Status: PARTIAL\n"

@@ -20,7 +20,7 @@ class RecursionTests(unittest.TestCase):
                     return (
                         "```repl\n"
                         "parent_only = 'secret'\n"
-                        "child = spawn_subagent('child', context)\n"
+                        "child = spawn_subagent(task='child', context=context)\n"
                         "print(child, context)\n"
                         "```"
                     )
@@ -52,7 +52,7 @@ class RecursionTests(unittest.TestCase):
         self.assertEqual(result.trace.children[0].status, "completed")
         system_prompts = [call[0]["content"] for call in factory.calls]
         self.assertEqual(system_prompts[0], system_prompts[1])
-        self.assertIn("Every agent has the same capabilities", system_prompts[0])
+        self.assertIn("recursive agent harness", system_prompts[0])
         self.assertTrue(factory.calls[0][1]["content"].startswith("Task:\nroot"))
         self.assertTrue(
             factory.calls[1][1]["content"].startswith("Delegated task:\nchild")

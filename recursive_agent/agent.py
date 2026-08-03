@@ -253,15 +253,15 @@ class RecursiveAgent:
             direct_children_spawned += allowed
             return allowed
 
-        def spawn_one(child_task: str, context: Any | None = None) -> str:
-            self._validate_task(child_task)
+        def spawn_one(task: str, context: Any | None = None) -> str:
+            self._validate_task(task)
             if depth < self.config.max_depth and reserve_child_slots(1) == 0:
                 return (
                     "Error: maximum direct subagents per agent "
                     f"({self.config.max_subagents_per_agent}) reached"
                 )
             return self._spawn_child(
-                task=child_task,
+                task=task,
                 context=context,
                 depth=depth,
                 parent_trace=trace,

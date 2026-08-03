@@ -3,71 +3,106 @@
 from __future__ import annotations
 
 
-DEFAULT_WEBSHOP_AGENT_PROMPT = """WebShop environment guidance:
+DEFAULT_WEBSHOP_AGENT_PROMPT = """### WebShop
 
-- The WebShop tools are already registered as REPL globals. Call them directly;
-  do not import WebShop, ReCode, or legacy helper modules.
-- Call observe() before choosing an action. Use only the current valid_actions.
-  `search[keywords]` in valid_actions is a template, not a literal query:
-  replace `keywords` with the actual search terms before calling act(). Never
-  execute `act("search[keywords]")`; use e.g.
-  `act("search[dip powder kit gentle nude]")`. Copy click targets exactly.
-- Extract every hard requirement from the instruction: product type, quantity,
-  pack/count, size, color, material, compatibility, and price.
-- On a result page, compare visible candidates before clicking. On a product
-  page, select every required visible option before clicking Buy Now.
-- Open Description or Features only when a required attribute is unclear. Keep
-  live environment actions serial; after an action error, observe again and do
-  not repeat the same stale action. Do not bounce between search, Back, and Next
-  without new evidence. At most one alternate search should be tried before
-  choosing the best visible candidate.
+Use the WebShop tools directly inside `repl`:
 
-Recursive delegation guidance:
-When several visible candidates or independent constraints need analysis, any
-agent may pass a copied observe() result to spawn_subagents. Each request should
-say explicitly whether the new agent is doing snapshot analysis or live
-environment operation. For snapshot analysis, do not call act; return candidate,
-matched requirements, missing requirements, evidence, and one recommended
-currently valid action. For a delegated live operation, call observe() and act()
-as needed, check valid_actions immediately before each action, make one
-state-changing call at a time, and return the resulting state. Every agent may
-delegate further when that adds useful work, but avoid repeating the same
-observation or creating delegation loops. Multiple agents must not act
-concurrently on the same session unless their work is explicitly coordinated.
-
-Few-shot 1 - parallel candidate analysis:
 ```repl
 state = observe()
-checks = spawn_subagents([
-    {"task": "Evaluate candidate A against every shopping requirement. "
-             "Return matched, missing, evidence, and one valid next action. "
-             "Analyze only this snapshot; this is a read-only delegation.", "context": state},
-    {"task": "Evaluate candidate B against every shopping requirement. "
-             "Return matched, missing, evidence, and one valid next action. "
-             "Analyze only this snapshot; this is a read-only delegation.", "context": state},
-])
-print(checks)
+result = act("search[wireless mouse under 30 dollars]")
 ```
-This example is intentionally read-only. A live-operation request can instead
-ask the new agent to operate the session using the serial
-observe-check-act-report protocol above.
 
-Few-shot 2 - ordinary navigation:
-```text
-observe -> act("search[dip powder kit gentle nude]") -> inspect current results
--> act("click[exact visible candidate]") -> select required options
--> act("click[buy now]")
+`observe()` returns the current page and `valid_actions`.
+Call `observe()` before every action and use only a current valid action.
+
+
+Replace example values with exact terms and labels from the current observation.
+Never execute template text such as `search[keywords]`.
+
+Extract all requirements from the shopping instruction, such as product type,
+quantity, size, color, material, compatibility, and price. Compare visible
+products, select all required options, and finish with `click[Buy Now]`.
+
+Execute only one state-changing action at a time. After an invalid action, call
+`observe()` again.
+
+### Sub-agents
+
+The WebShop environment cannot be operated concurrently. Call at most one
+sub-agent at a time and do not use `spawn_subagents`.
+
+Use a sub-agent for long product comparisons, requirement checking, or analysis
+that benefits from a fresh context.
+
+```repl
+state = observe()
+
+analysis = spawn_subagent(
+    task=(
+        "Compare the visible products against every shopping requirement. "
+        "Do not operate the environment. Return the best candidate, evidence, "
+        "missing requirements, and one recommended valid action."
+    ),
+    context={
+        "shopping_instruction": instruction,
+        "observation": state,
+    },
+)
 ```
-The search terms, product names, click labels, and option labels in this example
-are illustrative. Always replace them with values from the current observation;
-only the literal action pattern is reusable."""
+
+The sub-agent analyzes only the supplied snapshot and must not call `act()`.
+After it returns, call `observe()` again and continue operating the environment
+serially.
+
+Few-shot: every block below is a separate model step. `act()` returns the new
+page state. Print it and stop; the next step reads that state before acting.
+
+```repl
+state = observe()
+print(state)
+```
+
+```repl
+state = act("search[argan oil paraben free 2 oz]")
+print(state)
+```
+
+The returned state shows `click[b08h5slqf1]`, a paraben-free argan oil under
+$40. Use that exact current action.
+
+```repl
+state = act("click[b08h5slqf1]")
+print(state)
+```
+
+The returned product page shows scent `argan oil`, size
+`2 fl oz (pack of 2)`, price $5.95, and their exact actions.
+
+```repl
+state = act("click[argan oil]")
+print(state)
+```
+
+```repl
+state = act("click[2 fl oz (pack of 2)]")
+print(state)
+```
+
+```repl
+state = act("click[buy now]")
+print(state)
+```
+
+
+"""
 
 DEFAULT_WEBSHOP_TASK_TEMPLATE = """Complete this WebShop shopping episode.
 
 Shopping instruction:
 {instruction}
 
-Use `observe()` to inspect the current page and valid actions. Execute one valid
+WebShop is an interactive environment. Do not predict or execute an entire
+action sequence in advance. Use `print(observe())` to inspect the current page and valid actions. Execute one valid
 `act(action)` at a time, print its result, and continue until WebShop reaches a
 terminal state after `click[Buy Now]` or the environment step limit. Do not claim
 completion before the environment is terminal. Delegation remains optional and
