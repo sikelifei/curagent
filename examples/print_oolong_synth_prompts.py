@@ -45,7 +45,8 @@ def main() -> None:
         (
             "DELEGATED CHILD INITIAL USER PROMPT",
             build_initial_user(
-                "Process the assigned Oolong-Synthetic chunk and return its JSON report.",
+                "Process the assigned chunk and return concise mergeable text "
+                "with chunk_id, rows processed, and the required statistics.",
                 delegated=True,
             ),
         ),

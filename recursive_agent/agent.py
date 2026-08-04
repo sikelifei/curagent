@@ -111,11 +111,15 @@ class RecursiveAgent:
         max_subagents_per_agent: int | None = None,
         max_run_seconds: float | None = None,
         max_observation_chars: int | None = 8000,
+        max_repl_blocks_per_step: int | None = None,
         termination_check: TerminationCheck | None = None,
         prompt_addendum: str | None = None,
         system_prompt: str | None = None,
         forced_final_prompt: str | None = None,
         delegated_forced_final_prompt: str | None = None,
+        delegated_task_prompt: str | None = None,
+        delegated_prompt_addendum: str | None = None,
+        delegated_disabled_tools: frozenset[str] | set[str] | None = None,
         disabled_repl_builtins: frozenset[str] | set[str] | None = None,
         client_factory: ClientFactory | None = None,
     ) -> None:
@@ -144,6 +148,23 @@ class RecursiveAgent:
             if delegated_forced_final_prompt
             else None
         )
+        self._delegated_task_prompt = (
+            str(delegated_task_prompt).strip() if delegated_task_prompt else None
+        )
+        self._delegated_prompt_addendum = (
+            str(delegated_prompt_addendum).strip()
+            if delegated_prompt_addendum
+            else None
+        )
+        self._delegated_disabled_tools = frozenset(delegated_disabled_tools or ())
+        if max_repl_blocks_per_step is not None and (
+            not isinstance(max_repl_blocks_per_step, int)
+            or max_repl_blocks_per_step <= 0
+        ):
+            raise ConfigurationError(
+                "max_repl_blocks_per_step must be a positive integer or None"
+            )
+        self._max_repl_blocks_per_step = max_repl_blocks_per_step
         self._system_prompt = build_system_prompt(
             self._formatted_tools,
             prompt_addendum=self._prompt_addendum,
@@ -223,9 +244,22 @@ class RecursiveAgent:
 
         started = time.perf_counter()
         client = self._make_client()
+        delegated = (
+            parent_trace is not None
+            and self._delegated_prompt_addendum is not None
+        )
+        active_tools = {
+            name: info
+            for name, info in self._tools.items()
+            if not (delegated and name in self._delegated_disabled_tools)
+        }
         system_prompt = build_system_prompt(
-            self._formatted_tools,
-            prompt_addendum=self._prompt_addendum,
+            format_tools_for_prompt(active_tools),
+            prompt_addendum=(
+                self._delegated_prompt_addendum
+                if delegated and self._delegated_prompt_addendum is not None
+                else self._prompt_addendum
+            ),
             base_prompt=self._system_prompt_override,
         )
         trace.system_prompt = system_prompt
@@ -236,6 +270,11 @@ class RecursiveAgent:
                 "content": build_initial_user(
                     task,
                     delegated=parent_trace is not None,
+                    delegated_guidance=(
+                        self._delegated_task_prompt
+                        if delegated
+                        else None
+                    ),
                 ),
             },
         ]
@@ -292,7 +331,7 @@ class RecursiveAgent:
 
         repl = ReplSession(
             context=context,
-            tools=self._tool_values,
+            tools=tool_values(active_tools),
             spawn_subagent=spawn_one,
             spawn_subagents=spawn_many,
             disabled_builtins=self._disabled_repl_builtins,
@@ -314,6 +353,8 @@ class RecursiveAgent:
                 trace.steps.append(step_trace)
 
                 code_blocks = find_repl_blocks(response)
+                if self._max_repl_blocks_per_step is not None:
+                    code_blocks = code_blocks[: self._max_repl_blocks_per_step]
                 if not code_blocks:
                     messages.append({"role": "user", "content": "Continue."})
                     step_trace.duration_seconds = time.perf_counter() - step_started
@@ -328,6 +369,9 @@ class RecursiveAgent:
                     if execution.trace.error:
                         observation_errors.append(execution.trace.error)
                     run_context.check()
+
+                    if execution.trace.error:
+                        break
 
                     if execution.answer_ready:
                         step_trace.duration_seconds = time.perf_counter() - step_started

@@ -13,7 +13,9 @@ result = act("search[wireless mouse under 30 dollars]")
 ```
 
 `observe()` returns the current page and `valid_actions`.
-Call `observe()` before every action and use only a current valid action.
+Use the latest state returned by observe() or act() before choosing an action.
+Call observe() initially, after an invalid action, or when the current state is
+missing or stale.
 
 
 Replace example values with exact terms and labels from the current observation.

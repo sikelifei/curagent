@@ -48,6 +48,26 @@ class AgentEnvironment(ABC):
         return None
 
     @property
+    def delegated_task_prompt(self) -> str | None:
+        """Return optional environment guidance appended only to delegated tasks."""
+        return None
+
+    @property
+    def delegated_prompt_addendum(self) -> str | None:
+        """Return the prompt addendum visible only to delegated agents."""
+        return None
+
+    @property
+    def delegated_disabled_tools(self) -> frozenset[str]:
+        """Return custom tools hidden from delegated agents."""
+        return frozenset()
+
+    @property
+    def max_repl_blocks_per_step(self) -> int | None:
+        """Return an optional per-response REPL execution limit."""
+        return None
+
+    @property
     def disabled_repl_builtins(self) -> frozenset[str]:
         """Return REPL built-ins unavailable to every agent in this episode."""
         return frozenset()

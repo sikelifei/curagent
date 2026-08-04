@@ -142,10 +142,15 @@ def build_browsecomp_worker_system_prompt() -> str:
     return f"{SYSTEM_PROMPT.rstrip()}\n\n{BROWSECOMP_TASK_ROUTING_PROMPT.strip()}"
 
 
-def build_initial_user(task: str, *, delegated: bool = False) -> str:
+def build_initial_user(
+    task: str,
+    *,
+    delegated: bool = False,
+    delegated_guidance: str | None = None,
+) -> str:
     if not delegated:
         return f"Task:\n{task}"
-    return (
+    message = (
         f"Delegated task:\n{task}\n\n"
         "This task was supplied by another agent. A private copy of the context "
         "it supplied is available in the REPL variable `context`; it may be None. "
@@ -154,3 +159,6 @@ def build_initial_user(task: str, *, delegated: bool = False) -> str:
         "REPL, and delegation abilities as any other agent, and return a "
         "self-contained result for the caller."
     )
+    if delegated_guidance:
+        message = f"{message}\n\n{delegated_guidance.strip()}"
+    return message

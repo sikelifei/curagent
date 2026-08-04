@@ -40,11 +40,13 @@ def main() -> None:
     parser.add_argument("--agent-max-steps", type=int, default=10)
     parser.add_argument("--max-depth", type=int, default=1)
     parser.add_argument("--max-concurrent-subagents", type=int, default=16)
+    parser.add_argument("--max-subagents-per-agent", type=int, default=None)
     parser.add_argument("--max-run-seconds", type=float, default=3600)
-    parser.add_argument("--max-observation-chars", type=int, default=12000)
+    parser.add_argument("--max-observation-chars", type=int, default=64 * 1024)
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--max-tokens", type=int, default=4096)
     parser.add_argument("--request-timeout", type=float, default=300.0)
+    parser.add_argument("--disable-thinking", action="store_true")
     parser.add_argument("--bootstrap-samples", type=int, default=10000)
     parser.add_argument("--resume", action="store_true")
     parser.add_argument(
@@ -138,6 +140,7 @@ def _run_one(args: argparse.Namespace, position: int, row: dict[str, Any]) -> di
                 "max_steps": args.agent_max_steps,
                 "max_depth": args.max_depth,
                 "max_concurrent_subagents": args.max_concurrent_subagents,
+                "max_subagents_per_agent": args.max_subagents_per_agent,
                 "max_run_seconds": args.max_run_seconds,
                 "max_observation_chars": args.max_observation_chars,
             },
@@ -146,6 +149,11 @@ def _run_one(args: argparse.Namespace, position: int, row: dict[str, Any]) -> di
                 "sampling_args": {
                     "temperature": args.temperature,
                     "max_tokens": args.max_tokens,
+                    **(
+                        {"extra_body": {"enable_thinking": False}}
+                        if args.disable_thinking
+                        else {}
+                    ),
                 },
             },
         )
@@ -333,9 +341,11 @@ def _build_manifest(
         "answer_type_counts": dict(sorted(answer_type_counts.items())),
         "task_group_counts": dict(sorted(task_group_counts.items())),
         "temperature": args.temperature,
+        "disable_thinking": args.disable_thinking,
         "max_tokens": args.max_tokens,
         "max_depth": args.max_depth,
         "max_concurrent_subagents": args.max_concurrent_subagents,
+        "max_subagents_per_agent": args.max_subagents_per_agent,
         "chunk_char_limit": CHUNK_CHAR_LIMIT,
         "bootstrap_samples": args.bootstrap_samples,
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -356,7 +366,8 @@ def _build_prompt_preview(args: argparse.Namespace, row: dict[str, Any]) -> dict
         ),
         "root_initial_user_prompt": build_initial_user(environment.task, delegated=False),
         "delegated_initial_user_wrapper_example": build_initial_user(
-            "Process the assigned Oolong-Synthetic chunk and return its JSON report.",
+            "Process the assigned chunk and return concise mergeable text with "
+            "chunk_id, rows processed, and the required statistics.",
             delegated=True,
         ),
         "child_private_context_fields": [
@@ -385,6 +396,8 @@ def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) ->
             parser.error(f"{name} must be positive")
     if args.max_depth < 1:
         parser.error("max-depth must be at least 1 for root-to-subagent evaluation")
+    if args.max_subagents_per_agent is not None and args.max_subagents_per_agent <= 0:
+        parser.error("max-subagents-per-agent must be positive when supplied")
     if args.start_index < 0:
         parser.error("start-index must be non-negative")
     if args.count is not None and args.count <= 0:

@@ -19,6 +19,7 @@ from .prompts import (
     DEFAULT_SYNTH_AGENT_PROMPT,
     DEFAULT_SYNTH_FORCED_FINAL_PROMPT,
     DEFAULT_SYNTH_TASK_TEMPLATE,
+    build_synth_agent_prompt,
     build_synth_task_prompt,
 )
 from .scoring import evaluate_synth_response
@@ -62,6 +63,11 @@ class OolongSynthEnvironment(AgentEnvironment):
         self._submitted_answer: str | None = None
         self._closed = False
         self._tools = build_synth_tools(self)
+        dataset_intro = "\n".join(
+            line
+            for line in self.sample.context_window_text.splitlines()
+            if not line.startswith("Date:")
+        ).strip()
         self._context = {
             "oolong_role": "root",
             "environment": self.name,
@@ -72,6 +78,7 @@ class OolongSynthEnvironment(AgentEnvironment):
             "id": self.sample.sample_id,
             "context_window_id": self.sample.context_window_id,
             "question": self.sample.question,
+            "dataset_intro": dataset_intro,
             "answer_type": self.sample.answer_type,
             "task_group": self.sample.task_group,
             "task": self.sample.task,
@@ -89,8 +96,20 @@ class OolongSynthEnvironment(AgentEnvironment):
         return self._agent_prompt
 
     @property
+    def delegated_prompt_addendum(self) -> str | None:
+        return build_synth_agent_prompt(delegated=True)
+
+    @property
+    def delegated_disabled_tools(self) -> frozenset[str]:
+        return frozenset({"submit_answer"})
+
+    @property
     def forced_final_prompt(self) -> str:
         return DEFAULT_SYNTH_FORCED_FINAL_PROMPT
+
+    @property
+    def max_repl_blocks_per_step(self) -> int | None:
+        return None
 
     @property
     def context(self) -> dict[str, Any]:

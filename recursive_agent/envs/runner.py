@@ -59,6 +59,10 @@ def run_environment(
         "system_prompt",
         "forced_final_prompt",
         "delegated_forced_final_prompt",
+        "delegated_task_prompt",
+        "delegated_prompt_addendum",
+        "delegated_disabled_tools",
+        "max_repl_blocks_per_step",
         "disabled_repl_builtins",
     } & set(kwargs)
     if conflicts:
@@ -69,6 +73,7 @@ def run_environment(
         task_prompt = environment.task
         initial_context = copy.deepcopy(environment.context)
         tools = environment.tools()
+        is_oolong_synth = environment.name == "oolong_synth"
         backend, backend_kwargs = load_model_config(model_config)
         backend_kwargs = _merge_nested(backend_kwargs, dict(model_overrides or {}))
         agent = RecursiveAgent(
@@ -80,6 +85,18 @@ def run_environment(
             system_prompt=environment.system_prompt,
             forced_final_prompt=environment.forced_final_prompt,
             delegated_forced_final_prompt=environment.delegated_forced_final_prompt,
+            delegated_task_prompt=environment.delegated_task_prompt,
+            delegated_prompt_addendum=(
+                environment.delegated_prompt_addendum
+                if is_oolong_synth
+                else None
+            ),
+            delegated_disabled_tools=(
+                environment.delegated_disabled_tools
+                if is_oolong_synth
+                else frozenset()
+            ),
+            max_repl_blocks_per_step=environment.max_repl_blocks_per_step,
             disabled_repl_builtins=environment.disabled_repl_builtins,
             **kwargs,
         )

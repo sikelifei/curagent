@@ -107,6 +107,41 @@ class AgentCoreTests(unittest.TestCase):
         ).run("recover")
         self.assertEqual(result.answer, "recovered")
 
+    def test_python_error_stops_later_blocks_in_same_response(self) -> None:
+        forbidden_calls = []
+
+        def forbidden():
+            forbidden_calls.append(True)
+
+        def handler(messages, timeout):
+            if len(messages) == 2:
+                return "```repl\n1 / 0\n```\n```repl\nforbidden()\n```"
+            self.assertIn("Error: ZeroDivisionError", messages[-1]["content"])
+            return '```repl\nanswer["content"] = "recovered"\nanswer["ready"] = True\n```'
+
+        result = RecursiveAgent(
+            backend_kwargs={"model_name": "fake"},
+            tools={"forbidden": forbidden},
+            client_factory=FakeFactory(handler),
+        ).run("recover")
+        self.assertEqual(result.answer, "recovered")
+        self.assertEqual(forbidden_calls, [])
+        self.assertEqual(len(result.trace.steps[0].code_executions), 1)
+
+    def test_optional_repl_block_limit_executes_only_first_block(self) -> None:
+        def handler(messages, timeout):
+            if len(messages) == 2:
+                return "```repl\nx = 1\n```\n```repl\nx = 2\n```"
+            return '```repl\nanswer["content"] = str(x)\nanswer["ready"] = True\n```'
+
+        result = RecursiveAgent(
+            backend_kwargs={"model_name": "fake"},
+            max_repl_blocks_per_step=1,
+            client_factory=FakeFactory(handler),
+        ).run("limit blocks")
+        self.assertEqual(result.answer, "1")
+        self.assertEqual(len(result.trace.steps[0].code_executions), 1)
+
     def test_long_observation_is_truncated_for_model_but_preserved_in_trace(self) -> None:
         def handler(messages, timeout):
             if len(messages) == 2:

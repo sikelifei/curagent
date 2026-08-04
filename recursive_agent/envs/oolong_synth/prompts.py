@@ -1,116 +1,309 @@
-"""Prompts for flat 64K Oolong-Synthetic context decomposition."""
+"""Prompts for Oolong-Synthetic context decomposition."""
 
 from __future__ import annotations
 
 from .dataset import OolongSynthSample
 
 
-CHUNK_CHAR_LIMIT = 64 * 1024
+CHUNK_CHAR_LIMIT = 32 * 1024
 
 
-def build_synth_agent_prompt() -> str:
-    """Build the single prompt shared by Oolong-Synth roots and workers."""
+DEFAULT_OOLONG_SYNTH_PROMPT = r'''### Oolong-Synth
 
-    prompt = r"""Oolong-Synthetic environment guidance:
-
-The complete dataset is available only in the private REPL context. Records are
-unlabeled. There is no labels file, hidden label field, or tool that reveals the
-answer.
-
-This is one flat root/worker workflow. It overrides the generic autonomous
-task-routing guidance. Every agent receives this same prompt;
-`context["oolong_role"]` decides its role:
-
-- `root`: choose direct processing or 64K chunks, merge results, and be the only
-  agent allowed to call `submit_answer`.
-- `worker`: process one assigned chunk, never delegate, never call
-  `submit_answer`, and return one JSON report through `answer`.
-
-Use only executable `repl` blocks for Python. Wait for the real observation
-after each block and never invent a `REPL output:` line. Your first response
-must be exactly this block:
+Use only the data in `context`.
 
 ```repl
+question = context["question"]
+dataset_intro = context["dataset_intro"]
 source = context["context_window_text"]
-lines = source.splitlines()
-rows = [
-    line for line in lines
-    if line.startswith("Date:")
-    and " || User: " in line
-    and " || Instance: " in line
-]
-dataset_intro = context.get("dataset_intro")
-if dataset_intro is None:
-    first_row = next(i for i, line in enumerate(lines) if line in rows)
-    dataset_intro = "\n".join(lines[:first_row])
-print({
-    "role": context["oolong_role"],
-    "context_chars": len(source),
-    "complete_rows": len(rows),
-    "question": context["question"],
-})
 ```
 
-Each valid record is one complete line in the exact form
-`Date: ... || User: ... || Instance: ...`. Never split a record. Text before
-the first record is the dataset introduction.
+First check `len(source)`.
 
-ROOT WORKFLOW
+If `len(source) <= 32_768`, print the complete `source`, read it, and answer
+`question` directly according to `dataset_intro`.
 
-1. Use the `context_chars` measured above. If it is at most
-   __CHUNK_CHAR_LIMIT__ characters (64K), process the complete task in the root.
-   Read semantic records in consecutive bounded pages so no REPL observation is
-   truncated. Python may parse exact Date/User metadata and aggregate explicit
-   classifications.
-2. If `context_chars` is greater than __CHUNK_CHAR_LIMIT__, use the REPL to
-   greedily split all `rows`, in order, at record boundaries. The sum of
-   `len(row) + 1` in every chunk must be at most __CHUNK_CHAR_LIMIT__ characters.
-   A single record longer than the limit forms its own chunk. Every row must
-   appear in exactly one chunk.
-3. Send the chunks with `spawn_subagents`, in batches if needed. Use the task
-   `Process the assigned Oolong-Synthetic chunk and return its JSON report.`
-   Do not put data rows in the task text. Give each worker a private context with
-   only these fields: `oolong_role="worker"`, unique `chunk_id`, exact
-   `expected_rows`, that chunk's rows in `context_window_text`, `dataset_intro`,
-   the global `question`, and `dataset`.
-4. Parse every worker result with `json.loads`. Verify each chunk id once,
-   `rows_seen == expected_rows`, and all requested labels or grouping keys are
-   present. Retry only a missing or malformed chunk. Merge the verified partial
-   counts, perform the final ranking/comparison/arithmetic, and call
-   `submit_answer(...)` exactly once in the format requested by the question.
+If `len(source) > 32_768`, do not read the records. In one REPL block, split
+`source` at complete `Date:` record boundaries into non-overlapping chunks of
+at most 32,768 characters, then delegate all chunks:
 
-WORKER WORKFLOW
+Every child request must pass `question`, `dataset_intro`,
+`context_window_text`, and `chunk_id` in `context`.
 
-Read every assigned record exactly once, using consecutive bounded pages if the
-chunk does not fit in one observation. If an observation is truncated, shrink
-the page and reread only that page. Classify the meaning of each Instance; do
-not classify with keywords, regexes, word lists, label-name matches, or guessed
-class balance. Python may parse exact Date/User metadata and add labels that you
-explicitly assigned after reading.
 
-Apply the question's Date/User filters to your own rows. Return a compact raw
-JSON object with `chunk_id`, `rows_seen`, `counts`, and `totals`. Include zero
-counts for every candidate label, and make `rows_seen` equal `expected_rows`.
-Use `counts` for the question's additive partial results and `totals` for any
-population/denominator counts needed by before/after or ratio questions. For
-User/Date/month questions, use those normalized keys with nested label counts.
-Set `answer["content"] = json.dumps(report)` and then
-`answer["ready"] = True`. Return no prose or Markdown. A worker must never call
-`submit_answer` and must never spawn another agent.
+If delegation, read the returned results once, combine corresponding values
+in the next step, and do not read the original chunks again.
 
-SEMANTIC RULES
 
-Labels come only from reading each Instance. For `trec_coarse`: abbreviation is
-an acronym or expansion; entity is a concrete object, organization, product,
-language, event, animal, or substance; description and abstract concept asks
-for a definition, reason, manner, explanation, purpose, or meaning; human being
-is a person or group; location is a place; numeric value is a count, amount,
-date, age, distance, price, duration, percentage, or other number.
 
-The root must not replace failed worker coverage with a keyword classifier or a
-guess. Only the root submits the global answer; workers only report their own
-chunks."""
-    return prompt.replace("__CHUNK_CHAR_LIMIT__", f"{CHUNK_CHAR_LIMIT:,}")
+Here is two examples of how to split and delegate the source:
+### Example: direct processing
+
+**Step 1**
+
+Assistant:
+
+```repl
+question = context["question"]
+dataset_intro = context["dataset_intro"]
+source = context["context_window_text"]
+
+print(len(source))
+```
+
+REPL output:
+
+```text
+19709
+```
+
+**Step 2**
+
+Assistant sees that `19709 <= 32_768` and prints the complete source:
+
+```repl
+print(source)
+```
+
+REPL output:
+
+```text
+<complete source>
+```
+
+**Step 3**
+
+Assistant reads every record, obtains `ham=6` and `spam=1`, then submits:
+
+```repl
+submit_answer("Answer: ham is more common than spam")
+```
+
+---
+
+### Example: delegated processing
+
+**Step 1**
+
+Assistant:
+
+```repl
+question = context["question"]
+dataset_intro = context["dataset_intro"]
+source = context["context_window_text"]
+
+print(len(source))
+```
+
+REPL output:
+
+```text
+131072
+```
+
+**Step 2**
+
+Assistant sees that `131072 > 32_768`, splits the source at complete `Date:` record boundaries, and delegates all chunks:
+
+```repl
+limit = 32_768
+lines = source.splitlines(keepends=True)
+starts = [i for i, line in enumerate(lines) if line.startswith("Date:")]
+
+records = []
+for position, start in enumerate(starts):
+    end = starts[position + 1] if position + 1 < len(starts) else len(lines)
+    record = "".join(lines[start:end])
+    if len(record) > limit:
+        raise ValueError("A record exceeds the chunk limit")
+    records.append(record)
+
+chunks = []
+current = ""
+
+for record in records:
+    if current and len(current) + len(record) > limit:
+        chunks.append(current)
+        current = ""
+    current += record
+
+if current:
+    chunks.append(current)
+
+requests = []
+
+for chunk_id, chunk in enumerate(chunks):
+    requests.append({
+        "task": f"""
+Process every assigned record once.
+
+Question:
+{question}
+
+Classification instructions:
+{dataset_intro}
+
+Return:
+entity=<count> numeric_value=<count>
+""",
+        "context": {
+            "question": question,
+            "dataset_intro": dataset_intro,
+            "context_window_text": chunk,
+            "chunk_id": chunk_id,
+        },
+    })
+
+results = spawn_subagents(requests)
+print(results)
+```
+
+REPL output:
+
+```text
+[
+  "entity=2 numeric_value=1",
+  "entity=1 numeric_value=2",
+  "entity=0 numeric_value=0"
+]
+```
+
+**Step 3**
+
+Assistant aggregates the returned values:
+
+```repl
+import re
+
+entity_total = 0
+numeric_total = 0
+
+for result in results:
+    entity, numeric = map(
+        int,
+        re.search(
+            r"entity=(\d+)\s+numeric_value=(\d+)",
+            result
+        ).groups()
+    )
+    entity_total += entity
+    numeric_total += numeric
+
+print(entity_total, numeric_total)
+```
+
+REPL output:
+
+```text
+3 3
+```
+
+**Step 4**
+
+Assistant:
+
+```repl
+submit_answer("Answer: entity is same frequency as numeric value")
+```
+
+'''
+
+
+DEFAULT_OOLONG_SYNTH_CHILD_EXAMPLE = r'''### Example: subagent processing
+
+The parent gives each child both a `task` and a private `context`:
+
+```repl
+child_task = f"""
+Process every assigned record once.
+
+Question:
+{question}
+
+Classification instructions:
+{dataset_intro}
+
+Return the partial counts needed by the parent.
+"""
+
+request = {
+    "task": child_task,
+    "context": {
+        "question": question,
+        "dataset_intro": dataset_intro,
+        "context_window_text": chunk,
+        "chunk_id": chunk_id,
+    },
+}
+```
+
+The harness presents `request["task"]` to the child as its delegated task and
+provides every field in `request["context"]` through the child REPL variable
+`context`.
+
+**Step 1**
+
+Subagent:
+
+```repl
+question = context["question"]
+dataset_intro = context["dataset_intro"]
+source = context["context_window_text"]
+chunk_id = context["chunk_id"]
+
+print(len(source))
+```
+
+REPL output:
+
+```text
+32670
+```
+
+**Step 2**
+
+Subagent sees that the assigned chunk is no larger than 32,768 characters and
+prints it:
+
+```repl
+print(source)
+```
+
+REPL output:
+
+```text
+<complete assigned records>
+```
+
+**Step 3**
+
+Subagent reads every assigned record, filters the records relevant to the
+question, classifies them according to `dataset_intro`, and obtains:
+
+```text
+May spam count: 20
+May ham count: 29
+```
+
+Subagent returns the partial counts to its parent:
+
+```repl
+answer["content"] = "May spam count: 20, May ham count: 29"
+answer["ready"] = True
+```
+'''
+
+
+def build_synth_agent_prompt(*, delegated: bool = False) -> str:
+    if not delegated:
+        return DEFAULT_OOLONG_SYNTH_PROMPT
+    prompt = DEFAULT_OOLONG_SYNTH_PROMPT.split(
+        "### Example: direct processing", 1
+    )[0]
+    return f"{prompt.rstrip()}\n\n{DEFAULT_OOLONG_SYNTH_CHILD_EXAMPLE}"
+
+
+DEFAULT_SYNTH_AGENT_PROMPT = DEFAULT_OOLONG_SYNTH_PROMPT
 
 
 DEFAULT_SYNTH_TASK_TEMPLATE = """Solve this Oolong-Synthetic benchmark task.
@@ -119,8 +312,10 @@ Question:
 {question}
 
 The complete unlabeled dataset is available only in the private REPL variable
-`context["context_window_text"]`. Follow the environment's single 64K routing
-workflow and finish with `submit_answer(...)` in the exact requested format."""
+`context["context_window_text"]`. Route by its actual character length first;
+split and spawn over-limit text before inspecting records.
+Call `submit_answer(...)` exactly once in the requested format as soon as the
+exact result is computed; do not continue inspecting records."""
 
 
 def build_synth_task_prompt(
@@ -133,15 +328,16 @@ def build_synth_task_prompt(
     return template.replace("{question}", sample.question).strip()
 
 
-DEFAULT_SYNTH_AGENT_PROMPT = build_synth_agent_prompt()
-
 DEFAULT_SYNTH_FORCED_FINAL_PROMPT = """No working steps remain. Return the best final answer for the Oolong-Synthetic
 question as plain text using the answer format requested by the task. Do not add
 analysis, Markdown fences, or unsupported alternatives. Do not use tools,
 subagents, or submit_answer now."""
 
+
 __all__ = [
     "CHUNK_CHAR_LIMIT",
+    "DEFAULT_OOLONG_SYNTH_PROMPT",
+    "DEFAULT_OOLONG_SYNTH_CHILD_EXAMPLE",
     "DEFAULT_SYNTH_AGENT_PROMPT",
     "DEFAULT_SYNTH_TASK_TEMPLATE",
     "DEFAULT_SYNTH_FORCED_FINAL_PROMPT",
