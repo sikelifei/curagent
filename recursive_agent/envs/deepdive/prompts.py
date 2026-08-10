@@ -31,9 +31,10 @@ OTHER TIPS:
 - DeepDive web tools and curagent subagent functions are synchronous REPL functions. Call them directly; do not use `await`.
 - Keep intermediate outputs concise. Avoid printing entire long webpages unless necessary.
 
-You can perform actions by writing Python code blocks. You will get multiple steps to complete the task.
-For your current step, first briefly reason (~1-3 sentences) about your research or delegation strategy in <thought> </thought> tags, then output code in <repl> </repl> tags.
-Your code will be executed in curagent's persistent Python REPL and the output will be shown to you."""
+You will get multiple steps to complete the task. At each step, reason briefly
+about the next useful action, then return exactly one executable `repl` block
+and no text outside it. The code runs in curagent's persistent Python REPL and
+its output will be shown to you."""
 
 
 DEFAULT_DEEPDIVE_COMPLETION_PROMPT = """### Completion
@@ -51,8 +52,79 @@ answer["ready"] = True
 DEFAULT_DEEPDIVE_FORCED_FINAL_PROMPT = """No working steps remain. Return the best concise answer to the DeepDive factual question now as plain text. Do not use the REPL, web tools, or subagents."""
 
 
+DEFAULT_DEEPDIVE_TASK_TEMPLATE = """Answer this DeepDive factual question.
+
+Question:
+{question}"""
+
+
+DEFAULT_DEEPDIVE_TOOLS_PROMPT = """### Available tools
+
+Call tools from Python inside one `repl` block. The root and child prompts use
+this same tool reference. Calls are synchronous; do not use `await`.
+
+1. `search_web(query: str, max_results: int = 5) -> dict`
+   Search the web and return the DeepDive result dictionary. `max_results` must
+   be between 1 and 20.
+
+2. `view_webpage_content(url: str) -> str`
+   Fetch extracted content for one result URL when snippets are insufficient.
+
+3. `spawn_subagent(task: str, context=None) -> str`
+   Run one child agent on a focused research subproblem.
+
+4. `spawn_subagents(requests: list[dict]) -> list[str]`
+   Run independent child requests concurrently. Each request contains `task`
+   and optional `context`.
+
+REPL variables persist for the current agent. Return exactly one executable
+`repl` block per model step and no text outside it."""
+
+
+DEFAULT_DEEPDIVE_ROOT_PROMPT = "\n\n".join(
+    (
+        "You are the root agent for one DeepDive benchmark question.",
+        DEFAULT_DEEPDIVE_AGENT_PROMPT.strip(),
+        DEFAULT_DEEPDIVE_TOOLS_PROMPT.strip(),
+        DEFAULT_DEEPDIVE_COMPLETION_PROMPT.strip(),
+    )
+)
+
+
+DEFAULT_DEEPDIVE_CHILD_PROMPT = "\n\n".join(
+    (
+        """You are a child agent for DeepDive. Solve only the delegated research
+task in the initial user message. The root benchmark question is not included
+unless the parent explicitly passes it in `context`. A private copy of that
+value is available as the REPL variable `context`. Return a self-contained
+result to the parent. You may recursively delegate smaller subproblems.""",
+        DEFAULT_DEEPDIVE_AGENT_PROMPT.strip(),
+        DEFAULT_DEEPDIVE_TOOLS_PROMPT.strip(),
+        DEFAULT_DEEPDIVE_COMPLETION_PROMPT.strip(),
+    )
+)
+
+
+def build_deepdive_task_prompt(
+    question: str,
+    *,
+    template: str = DEFAULT_DEEPDIVE_TASK_TEMPLATE,
+) -> str:
+    question = str(question).strip()
+    if not question:
+        raise ValueError("DeepDive question cannot be empty")
+    if "{question}" not in template:
+        raise ValueError("DeepDive task template must contain {question}")
+    return template.replace("{question}", question).strip()
+
+
 __all__ = [
     "DEFAULT_DEEPDIVE_AGENT_PROMPT",
+    "DEFAULT_DEEPDIVE_CHILD_PROMPT",
     "DEFAULT_DEEPDIVE_COMPLETION_PROMPT",
     "DEFAULT_DEEPDIVE_FORCED_FINAL_PROMPT",
+    "DEFAULT_DEEPDIVE_ROOT_PROMPT",
+    "DEFAULT_DEEPDIVE_TASK_TEMPLATE",
+    "DEFAULT_DEEPDIVE_TOOLS_PROMPT",
+    "build_deepdive_task_prompt",
 ]

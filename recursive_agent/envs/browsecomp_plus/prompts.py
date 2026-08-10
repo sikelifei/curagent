@@ -7,24 +7,18 @@ from .dataset import BrowseCompQuery
 
 DEFAULT_BROWSECOMP_AGENT_PROMPT = r"""### BrowseComp-Plus evidence search
 
-You are a deep research agent. You need to answer the given question by interact
-ing with a search engine, using the search tool provided. Please perform reasoning and
-use the tool step by step, in an interleaved manner. You may use the search tool multiple times.
+Search the fixed corpus step by step and ground every important claim in an
+observed snippet and docid. Start with distinctive names, dates, titles, or
+phrases from the question, then refine queries using useful retrieved leads.
 
-Available in the REPL:
+Delegate focused, independent constraints when that reduces search overlap.
+Give each child a narrow objective and ask for candidates, supported claims,
+docids, contradictions, and unresolved facts. Treat child reports as leads to
+combine and verify, not as automatically correct answers.
 
-```repl
-results = search(query)
-
-report = spawn_subagent(task, context=None)
-
-reports = spawn_subagents([
-    {"task": task1, "context": context1},
-    {"task": task2, "context": context2},
-])
-```
-
-"""
+Do not invent documents, repeat equivalent queries, or use a docid itself as a
+search query. Stop when one candidate satisfies all material constraints or the
+available evidence cannot support an answer."""
 
 
 DEFAULT_BROWSECOMP_ROOT_COMPLETION_PROMPT = r"""### Completion
@@ -121,6 +115,55 @@ Never invent claims or docids.
 """
 
 
+DEFAULT_BROWSECOMP_TOOLS_PROMPT = r"""### Available tools
+
+Call tools from Python inside one `repl` block. The root and child prompts use
+this same tool reference. Calls are synchronous; do not use `await`.
+
+1. `search(query: str) -> list[dict]`
+   Search the fixed BrowseComp-Plus BM25 corpus. The tool returns up to five
+   results containing `docid`, `score`, and `snippet`. The root and all children
+   share one search-call budget.
+   Example: `results = search("distinctive entity clue")`
+
+2. `spawn_subagent(task: str, context=None) -> str`
+   Run one child agent on a focused evidence-search subtask.
+
+3. `spawn_subagents(requests: list[dict]) -> list[str]`
+   Run independent child requests concurrently. Each request contains `task`
+   and optional `context`.
+
+REPL variables persist for the current agent. Return exactly one executable
+`repl` block per model step and no text outside it."""
+
+
+DEFAULT_BROWSECOMP_ROOT_PROMPT = "\n\n".join(
+    (
+        """You are the root agent for one BrowseComp-Plus question. Search the
+fixed corpus, delegate focused investigations when useful, verify the evidence,
+and produce the final benchmark answer.""",
+        DEFAULT_BROWSECOMP_AGENT_PROMPT.strip(),
+        DEFAULT_BROWSECOMP_TOOLS_PROMPT.strip(),
+        DEFAULT_BROWSECOMP_ROOT_COMPLETION_PROMPT.strip(),
+    )
+)
+
+
+DEFAULT_BROWSECOMP_CHILD_PROMPT = "\n\n".join(
+    (
+        """You are a child agent for BrowseComp-Plus. Investigate only the
+delegated task in the initial user message. The root question is not included
+unless the parent explicitly passes it in `context`. A private copy of that
+value is available as the REPL variable `context`. You may recursively delegate
+a smaller independent investigation. Return a self-contained evidence report
+to the parent and never invent claims or docids.""",
+        DEFAULT_BROWSECOMP_AGENT_PROMPT.strip(),
+        DEFAULT_BROWSECOMP_TOOLS_PROMPT.strip(),
+        DEFAULT_BROWSECOMP_WORKER_COMPLETION_PROMPT.strip(),
+    )
+)
+
+
 def build_browsecomp_task_prompt(
     sample: BrowseCompQuery,
     *,
@@ -135,9 +178,12 @@ def build_browsecomp_task_prompt(
 
 __all__ = [
     "DEFAULT_BROWSECOMP_AGENT_PROMPT",
+    "DEFAULT_BROWSECOMP_CHILD_PROMPT",
     "DEFAULT_BROWSECOMP_ROOT_COMPLETION_PROMPT",
+    "DEFAULT_BROWSECOMP_ROOT_PROMPT",
     "DEFAULT_BROWSECOMP_WORKER_COMPLETION_PROMPT",
     "DEFAULT_BROWSECOMP_TASK_TEMPLATE",
+    "DEFAULT_BROWSECOMP_TOOLS_PROMPT",
     "DEFAULT_BROWSECOMP_FORCED_FINAL_PROMPT",
     "DEFAULT_BROWSECOMP_WORKER_FORCED_FINAL_PROMPT",
     "build_browsecomp_task_prompt",

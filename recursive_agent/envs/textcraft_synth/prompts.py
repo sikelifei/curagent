@@ -48,8 +48,7 @@ Craft N additional ITEM in the shared inventory. Inspect the inventory and
 recipes, craft required intermediates or recursively delegate them when useful,
 verify the requested increase, and return immediately.
 
-Use one repl block per response. First briefly state your strategy in 1-3
-sentences, then execute the next useful action.
+Use one executable `repl` block per response and perform the next useful action.
 """
 
 
@@ -110,6 +109,67 @@ tools, do not call `finish`, and do not claim completion of the overall task.
 """
 
 
+DEFAULT_TEXTCRAFT_TOOLS_PROMPT = """### Available tools
+
+Call tools from Python inside one `repl` block. The root and child prompts use
+this same tool reference. Calls are synchronous; do not use `await`.
+
+1. `craft(ingredients: dict, target: tuple[str, int]) -> str`
+   Craft items using ingredients from the shared inventory.
+   - `ingredients`: `{item_name: count}` to consume.
+   - `target`: `(item_name, total_count)`; `total_count` must be divisible by
+     the recipe's `result_count`.
+   - Example: `craft({"m0_i1": 2, "m1_i1": 1}, ("m2_i2", 2))`
+
+2. `get_info(items: list[str] | None = None) -> list[dict]`
+   Get inventory and recipe information for the requested items. Each result
+   includes `item`, `can_craft`, `is_base`, `in_inventory`, `crafting_depth`,
+   and `recipes`. A recipe includes `ingredients` and `result_count`.
+   - `crafting_depth`: 0 for a base item, 1 for a direct craft, and 2+ when
+     intermediate items are required.
+   - Example: `get_info(["m2_i2", "raw_m0"])`
+
+3. `view_inventory() -> dict[str, int]`
+   Return the current shared inventory.
+
+4. `finish(message: str) -> str`
+   Complete the root task after every requested additional item is present.
+
+5. `spawn_subagent(task: str, context=None) -> str`
+   Run one child agent. Put exact target items and quantities in `task`; pass
+   supporting data through `context` when needed.
+
+6. `spawn_subagents(requests: list[dict]) -> list[str]`
+   Run independent child requests concurrently. Each request contains `task`
+   and optional `context`. All agents share the live crafting inventory.
+
+REPL variables persist for the current agent. Return exactly one executable
+`repl` block per model step and no text outside it."""
+
+
+DEFAULT_TEXTCRAFT_ROOT_PROMPT = "\n\n".join(
+    (
+        "You are the root agent for one TextCraft-Synth benchmark task.",
+        DEFAULT_TEXTCRAFT_AGENT_PROMPT.strip(),
+        DEFAULT_TEXTCRAFT_TOOLS_PROMPT.strip(),
+        DEFAULT_TEXTCRAFT_COMPLETION_PROMPT.strip(),
+    )
+)
+
+
+DEFAULT_TEXTCRAFT_CHILD_PROMPT = "\n\n".join(
+    (
+        """You are a child agent for a TextCraft-Synth benchmark task. Solve only
+the delegated task in the initial user message. The root benchmark task is not
+included. A private copy of any value supplied by the parent is available as
+the REPL variable `context`. Return a self-contained result to the parent.""",
+        DEFAULT_TEXTCRAFT_SUBAGENT_PROMPT.strip(),
+        DEFAULT_TEXTCRAFT_TOOLS_PROMPT.strip(),
+        DEFAULT_TEXTCRAFT_SUBAGENT_COMPLETION_PROMPT.strip(),
+    )
+)
+
+
 def build_textcraft_task_prompt(
     targets: Mapping[str, int],
     *,
@@ -142,11 +202,14 @@ def build_textcraft_task_prompt(
 
 __all__ = [
     "DEFAULT_TEXTCRAFT_AGENT_PROMPT",
+    "DEFAULT_TEXTCRAFT_CHILD_PROMPT",
     "DEFAULT_TEXTCRAFT_COMPLETION_PROMPT",
     "DEFAULT_TEXTCRAFT_FORCED_FINAL_PROMPT",
     "DEFAULT_TEXTCRAFT_SUBAGENT_FORCED_FINAL_PROMPT",
     "DEFAULT_TEXTCRAFT_SUBAGENT_COMPLETION_PROMPT",
     "DEFAULT_TEXTCRAFT_SUBAGENT_PROMPT",
     "DEFAULT_TEXTCRAFT_TASK_TEMPLATE",
+    "DEFAULT_TEXTCRAFT_TOOLS_PROMPT",
+    "DEFAULT_TEXTCRAFT_ROOT_PROMPT",
     "build_textcraft_task_prompt",
 ]

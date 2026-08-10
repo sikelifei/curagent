@@ -5,6 +5,10 @@ MODEL=/data2/zhangwenjian/model/Qwen3-4B-Instruct-2507
 MYVLLM=/data2/zhangwenjian/miniconda3/envs/myvllm
 CUDA_HOME="$MYVLLM/lib/python3.12/site-packages/nvidia/cu13"
 PORT=${PORT:-56781}
+GPU_MEMORY_UTILIZATION=${GPU_MEMORY_UTILIZATION:-0.25}
+MAX_NUM_SEQS=${MAX_NUM_SEQS:-4}
+MAX_MODEL_LEN=${MAX_MODEL_LEN:-65536}
+KV_CACHE_MEMORY_BYTES=${KV_CACHE_MEMORY_BYTES:-12G}
 
 export CUDA_HOME
 export PATH="$CUDA_HOME/bin:$MYVLLM/bin:$PATH"
@@ -21,4 +25,8 @@ hash -r
 exec "$MYVLLM/bin/vllm" serve "$MODEL" \
   --host 0.0.0.0 \
   --port "$PORT" \
-  --served-model-name "$MODEL"
+  --served-model-name "$MODEL" \
+  --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION" \
+  --max-num-seqs "$MAX_NUM_SEQS" \
+  --max-model-len "$MAX_MODEL_LEN" \
+  --kv-cache-memory-bytes "$KV_CACHE_MEMORY_BYTES"

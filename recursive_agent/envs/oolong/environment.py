@@ -17,6 +17,8 @@ from .dataset import (
 )
 from .prompts import (
     DEFAULT_OOLONG_AGENT_PROMPT,
+    DEFAULT_OOLONG_CHILD_PROMPT,
+    DEFAULT_OOLONG_ROOT_PROMPT,
     DEFAULT_OOLONG_TASK_TEMPLATE,
     build_oolong_task_prompt,
 )
@@ -90,6 +92,14 @@ class OolongEnvironment(AgentEnvironment):
     @property
     def agent_prompt(self) -> str:
         return self._agent_prompt
+
+    @property
+    def root_prompt(self) -> str:
+        return DEFAULT_OOLONG_ROOT_PROMPT
+
+    @property
+    def child_prompt(self) -> str:
+        return DEFAULT_OOLONG_CHILD_PROMPT
 
     @property
     def context(self) -> dict[str, Any]:

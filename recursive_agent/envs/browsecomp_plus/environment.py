@@ -10,11 +10,13 @@ from ..registry import register_environment
 from .dataset import BrowseCompQuery
 from .prompts import (
     DEFAULT_BROWSECOMP_AGENT_PROMPT,
+    DEFAULT_BROWSECOMP_CHILD_PROMPT,
     DEFAULT_BROWSECOMP_FORCED_FINAL_PROMPT,
     DEFAULT_BROWSECOMP_ROOT_COMPLETION_PROMPT,
     DEFAULT_BROWSECOMP_WORKER_COMPLETION_PROMPT,
     DEFAULT_BROWSECOMP_WORKER_FORCED_FINAL_PROMPT,
     DEFAULT_BROWSECOMP_TASK_TEMPLATE,
+    DEFAULT_BROWSECOMP_ROOT_PROMPT,
     build_browsecomp_task_prompt,
 )
 from .tools import MCPBM25Client, build_browsecomp_tools, normalize_search_results
@@ -72,6 +74,14 @@ class BrowseCompPlusEnvironment(AgentEnvironment):
     @property
     def agent_prompt(self) -> str:
         return self._agent_prompt
+
+    @property
+    def root_prompt(self) -> str:
+        return DEFAULT_BROWSECOMP_ROOT_PROMPT
+
+    @property
+    def child_prompt(self) -> str:
+        return DEFAULT_BROWSECOMP_CHILD_PROMPT
 
     @property
     def completion_prompt(self) -> str:

@@ -9,8 +9,11 @@ from pathlib import Path
 from recursive_agent.envs import available_environments
 from recursive_agent.envs.oolong_synth import (
     CHUNK_CHAR_LIMIT,
+    DEFAULT_OOLONG_SYNTH_TOOLS_PROMPT,
     DEFAULT_OOLONG_SYNTH_PROMPT,
     DEFAULT_SYNTH_AGENT_PROMPT,
+    DEFAULT_SYNTH_CHILD_PROMPT,
+    DEFAULT_SYNTH_ROOT_PROMPT,
     OolongSynthDataset,
     OolongSynthEnvironment,
     evaluate_synth_response,
@@ -155,6 +158,18 @@ class OolongSynthEnvironmentTests(unittest.TestCase):
         self.assertIn("submit_answer", DEFAULT_SYNTH_AGENT_PROMPT)
 
         environment = OolongSynthEnvironment(samples=[sample_row()])
+        self.assertEqual(environment.root_prompt, DEFAULT_SYNTH_ROOT_PROMPT)
+        self.assertEqual(environment.child_prompt, DEFAULT_SYNTH_CHILD_PROMPT)
+        self.assertEqual(
+            DEFAULT_SYNTH_ROOT_PROMPT.count(DEFAULT_OOLONG_SYNTH_TOOLS_PROMPT),
+            1,
+        )
+        self.assertEqual(
+            DEFAULT_SYNTH_CHILD_PROMPT.count(DEFAULT_OOLONG_SYNTH_TOOLS_PROMPT),
+            1,
+        )
+        self.assertNotIn("Custom tools:", DEFAULT_SYNTH_ROOT_PROMPT)
+        self.assertNotIn("Custom tools:", DEFAULT_SYNTH_CHILD_PROMPT)
         self.assertIn("Labels are", environment.context["dataset_intro"])
         self.assertIn("submit_answer(...)` exactly once", environment.task)
         self.assertIsNone(environment.delegated_task_prompt)

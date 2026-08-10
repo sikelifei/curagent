@@ -310,6 +310,27 @@ answer["ready"] = True
 ```'''
 
 
+DEFAULT_OOLONG_SYNTH_TOOLS_PROMPT = r'''### Available tools
+
+Call tools from Python inside one `repl` block. The root and child prompts use
+this same tool reference. Calls are synchronous; do not use `await`.
+
+1. `submit_answer(answer: str) -> dict`
+   Submit the exact final Oolong-Synthetic answer in the format requested by
+   the task. This ends and scores the root episode. A child must not call it.
+
+2. `spawn_subagent(task: str, context=None) -> str`
+   Run one child agent with a copied context. Include the exact records,
+   classification, or count the child must return.
+
+3. `spawn_subagents(requests: list[dict]) -> list[str]`
+   Run independent child requests concurrently. Each request contains `task`
+   and optional `context`.
+
+REPL variables persist for the current agent. Return exactly one executable
+`repl` block per model step and no text outside it.'''
+
+
 def build_synth_agent_prompt(*, delegated: bool = False) -> str:
     if not delegated:
         return DEFAULT_OOLONG_SYNTH_PROMPT
@@ -320,6 +341,30 @@ def build_synth_agent_prompt(*, delegated: bool = False) -> str:
 
 
 DEFAULT_SYNTH_AGENT_PROMPT = build_synth_agent_prompt()
+
+
+DEFAULT_SYNTH_ROOT_PROMPT = "\n\n".join(
+    (
+        "You are the root agent for one Oolong-Synthetic benchmark task.",
+        DEFAULT_SYNTH_AGENT_PROMPT.strip(),
+        DEFAULT_OOLONG_SYNTH_TOOLS_PROMPT.strip(),
+        DEFAULT_OOLONG_SYNTH_ROOT_COMPLETION_PROMPT.strip(),
+    )
+)
+
+
+DEFAULT_SYNTH_CHILD_PROMPT = "\n\n".join(
+    (
+        """You are a child agent for Oolong-Synthetic. Solve only the delegated
+task in the initial user message. The root benchmark task is not included
+unless the parent explicitly passes it in `context`. A private copy of that
+value is available as the REPL variable `context`. Return one mergeable partial
+result to the parent and never claim completion of the full sample.""",
+        build_synth_agent_prompt(delegated=True).strip(),
+        DEFAULT_OOLONG_SYNTH_TOOLS_PROMPT.strip(),
+        DEFAULT_OOLONG_SYNTH_SUBAGENT_COMPLETION_PROMPT.strip(),
+    )
+)
 
 
 DEFAULT_SYNTH_TASK_TEMPLATE = """Solve this Oolong-Synthetic benchmark task.
@@ -362,7 +407,10 @@ __all__ = [
     "DEFAULT_OOLONG_SYNTH_CHILD_EXAMPLE",
     "DEFAULT_OOLONG_SYNTH_ROOT_COMPLETION_PROMPT",
     "DEFAULT_OOLONG_SYNTH_SUBAGENT_COMPLETION_PROMPT",
+    "DEFAULT_OOLONG_SYNTH_TOOLS_PROMPT",
+    "DEFAULT_SYNTH_CHILD_PROMPT",
     "DEFAULT_SYNTH_AGENT_PROMPT",
+    "DEFAULT_SYNTH_ROOT_PROMPT",
     "DEFAULT_SYNTH_TASK_TEMPLATE",
     "DEFAULT_SYNTH_FORCED_FINAL_PROMPT",
     "DEFAULT_SYNTH_SUBAGENT_FORCED_FINAL_PROMPT",

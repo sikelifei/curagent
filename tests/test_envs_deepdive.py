@@ -44,7 +44,7 @@ class DeepDiveEnvironmentTests(unittest.TestCase):
         self.assertIn("spawn_subagent(task, context=None)", prompt)
         self.assertIn("spawn_subagents(requests)", prompt)
         self.assertIn('answer["ready"] = True', prompt)
-        self.assertIn("<repl> </repl>", prompt)
+        self.assertIn("one executable `repl` block", prompt)
         self.assertNotIn("launch_subagent", prompt)
         self.assertNotIn("finish(...)", prompt)
         self.assertNotIn("<python>", prompt)
@@ -52,7 +52,10 @@ class DeepDiveEnvironmentTests(unittest.TestCase):
 
     def test_environment_uses_sync_deepdive_tools_and_hides_answer(self) -> None:
         environment = DeepDiveEnvironment(sample=self.sample, harness=_FakeHarness())
-        self.assertEqual(environment.task, "Question?")
+        self.assertEqual(
+            environment.task,
+            "Answer this DeepDive factual question.\n\nQuestion:\nQuestion?",
+        )
         self.assertNotIn("ground truth secret", str(environment.context))
         result = environment.search_web("query", 3)
         self.assertEqual(result["results"][0]["content"], "evidence")
@@ -70,11 +73,11 @@ class DeepDiveEnvironmentTests(unittest.TestCase):
         def handler(messages, timeout):
             del timeout
             system = messages[0]["content"]
-            self.assertIn("recursive agent harness", system)
+            self.assertNotIn("recursive agent harness", system)
+            self.assertNotIn("Custom tools:", system)
             self.assertIn("DeepDive web research", system)
             self.assertNotIn("launch_subagent", system)
-            task = initial_task(messages)
-            if task == "Question?":
+            if messages[1]["content"].startswith("Task:\n"):
                 return (
                     "<thought>delegate one verification</thought>\n"
                     "<repl>report = spawn_subagent('verify')\n"

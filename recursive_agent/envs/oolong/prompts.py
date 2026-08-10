@@ -285,6 +285,82 @@ execute `submit_answer(r'\\boxed{YOUR_ANSWER}')` after aggregation so the offici
 scorer can parse the answer."""
 
 
+DEFAULT_OOLONG_TOOLS_PROMPT = r"""### Available tools
+
+Call tools from Python inside one `repl` block. The root and child prompts use
+this same tool reference. Calls are synchronous; do not use `await`.
+
+1. `observe() -> dict`
+   Return compact Oolong metadata, the question, context length, and submission
+   state. The transcript itself remains in `context["context_window_text"]`.
+
+2. `submit_answer(answer: str) -> dict`
+   Submit the root's final answer, preferably as `\boxed{...}`. This ends and
+   scores the episode. A child must not call it.
+
+3. `episode_report() -> dict`
+   Return current submission, parsed answer, score, and episode metadata.
+
+4. `spawn_subagent(task: str, context=None) -> str`
+   Run one child agent with an isolated copy of the supplied context.
+
+5. `spawn_subagents(requests: list[dict]) -> list[str]`
+   Run independent child requests concurrently. Each request contains `task`
+   and optional `context`.
+
+REPL variables persist for the current agent. Return exactly one executable
+`repl` block per model step and no text outside it."""
+
+
+DEFAULT_OOLONG_ROOT_COMPLETION_PROMPT = r"""### Completion
+
+After aggregating the evidence, call `submit_answer(r'\boxed{ANSWER}')` exactly
+once. Do not finish by setting `answer["ready"]` or by returning prose."""
+
+
+DEFAULT_OOLONG_CHILD_GUIDANCE = r"""### Oolong child role
+
+Solve only the delegated extraction or aggregation task in the initial user
+message. The root benchmark question and full transcript are not included
+unless the parent explicitly passes them in `context`. A private copy of that
+value is available as the REPL variable `context`.
+
+Do not call `observe`, `submit_answer`, or `episode_report`. Inspect only the
+context supplied by the parent. You may recursively delegate a smaller,
+independent subtask. Return compact, mergeable evidence and never claim that
+the root episode is complete."""
+
+
+DEFAULT_OOLONG_CHILD_COMPLETION_PROMPT = r"""### Completion
+
+Return the requested report by setting:
+
+```repl
+answer["content"] = result
+answer["ready"] = True
+```"""
+
+
+DEFAULT_OOLONG_ROOT_PROMPT = "\n\n".join(
+    (
+        "You are the root agent for one Oolong-real benchmark task.",
+        DEFAULT_OOLONG_AGENT_PROMPT.strip(),
+        DEFAULT_OOLONG_TOOLS_PROMPT.strip(),
+        DEFAULT_OOLONG_ROOT_COMPLETION_PROMPT.strip(),
+    )
+)
+
+
+DEFAULT_OOLONG_CHILD_PROMPT = "\n\n".join(
+    (
+        "You are a child agent for one Oolong-real benchmark task.",
+        DEFAULT_OOLONG_CHILD_GUIDANCE.strip(),
+        DEFAULT_OOLONG_TOOLS_PROMPT.strip(),
+        DEFAULT_OOLONG_CHILD_COMPLETION_PROMPT.strip(),
+    )
+)
+
+
 def build_oolong_task_prompt(
     sample: OolongSample,
     *,

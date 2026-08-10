@@ -213,6 +213,9 @@ class WebShopEnvironmentTests(unittest.TestCase):
         self.assertIn("observe", factory.calls[0][0]["content"])
         self.assertIn("act", factory.calls[0][0]["content"])
         system_prompt = factory.calls[0][0]["content"]
+        self.assertEqual(system_prompt, environment.root_prompt)
+        self.assertNotIn("Custom tools:", system_prompt)
+        self.assertNotIn("recursive agent harness", system_prompt)
         self.assertIn("### WebShop", system_prompt)
         self.assertIn("do not use `spawn_subagents`", system_prompt)
         self.assertIn("Never execute template text", system_prompt)

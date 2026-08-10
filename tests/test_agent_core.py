@@ -16,6 +16,49 @@ from .fakes import FakeFactory, initial_task
 
 
 class AgentCoreTests(unittest.TestCase):
+    def test_complete_root_and_child_prompts_bypass_generated_tool_text(self) -> None:
+        def handler(messages, timeout):
+            del timeout
+            task = initial_task(messages)
+            if task == "root-only benchmark task":
+                return (
+                    "```repl\n"
+                    "result = spawn_subagent('child assignment', {'value': 1})\n"
+                    "answer['content'] = result\n"
+                    "answer['ready'] = True\n"
+                    "```"
+                )
+            return (
+                "```repl\n"
+                "answer['content'] = 'child done'\n"
+                "answer['ready'] = True\n"
+                "```"
+            )
+
+        factory = FakeFactory(handler)
+        result = RecursiveAgent(
+            backend_kwargs={"model_name": "fake"},
+            tools={
+                "lookup": {
+                    "tool": lambda: "value",
+                    "description": "SCHEMA_DESCRIPTION_MUST_NOT_BE_APPENDED",
+                }
+            },
+            root_prompt="ROOT_PROMPT\nHANDWRITTEN_TOOLS",
+            child_prompt="CHILD_PROMPT\nHANDWRITTEN_TOOLS",
+            max_depth=1,
+            client_factory=factory,
+        ).run("root-only benchmark task")
+
+        self.assertEqual(result.answer, "child done")
+        root_messages, child_messages = factory.calls
+        self.assertEqual(root_messages[0]["content"], "ROOT_PROMPT\nHANDWRITTEN_TOOLS")
+        self.assertEqual(child_messages[0]["content"], "CHILD_PROMPT\nHANDWRITTEN_TOOLS")
+        self.assertNotIn("SCHEMA_DESCRIPTION", str(factory.calls))
+        self.assertEqual(root_messages[1]["content"], "Task:\nroot-only benchmark task")
+        self.assertEqual(child_messages[1]["content"], "Delegated task:\nchild assignment")
+        self.assertNotIn("root-only benchmark task", str(child_messages))
+
     def test_prompt_history_tools_and_normal_ready(self) -> None:
         def handler(messages, timeout):
             if len(messages) == 2:
@@ -50,12 +93,9 @@ class AgentCoreTests(unittest.TestCase):
         self.assertNotIn("TOP_SECRET_VALUE", system)
         self.assertNotIn("planner", system.lower())
         self.assertNotIn("orchestrator", system.lower())
-        self.assertIn(
-            "At any point, you may continue solving the task locally", system
-        )
-        self.assertIn(
-            "Delegate only when the expected benefit exceeds the added cost", system
-        )
+        self.assertIn("Decide whether to:", system)
+        self.assertIn("solve the task directly", system)
+        self.assertIn("delegate one subtask", system)
         self.assertNotIn("Classify the task before solving", system)
         self.assertNotIn("DECOMPOSABLE", system)
         self.assertEqual(

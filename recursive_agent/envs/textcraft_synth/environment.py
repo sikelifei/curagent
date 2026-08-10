@@ -19,12 +19,14 @@ from .dataset import (
 )
 from .prompts import (
     DEFAULT_TEXTCRAFT_AGENT_PROMPT,
+    DEFAULT_TEXTCRAFT_CHILD_PROMPT,
     DEFAULT_TEXTCRAFT_COMPLETION_PROMPT,
     DEFAULT_TEXTCRAFT_FORCED_FINAL_PROMPT,
     DEFAULT_TEXTCRAFT_SUBAGENT_FORCED_FINAL_PROMPT,
     DEFAULT_TEXTCRAFT_SUBAGENT_COMPLETION_PROMPT,
     DEFAULT_TEXTCRAFT_SUBAGENT_PROMPT,
     DEFAULT_TEXTCRAFT_TASK_TEMPLATE,
+    DEFAULT_TEXTCRAFT_ROOT_PROMPT,
     build_textcraft_task_prompt,
 )
 from .scoring import evaluate_inventory
@@ -93,6 +95,14 @@ class TextCraftSynthEnvironment(AgentEnvironment):
     @property
     def agent_prompt(self) -> str:
         return self._agent_prompt
+
+    @property
+    def root_prompt(self) -> str:
+        return DEFAULT_TEXTCRAFT_ROOT_PROMPT
+
+    @property
+    def child_prompt(self) -> str:
+        return DEFAULT_TEXTCRAFT_CHILD_PROMPT
 
     @property
     def forced_final_prompt(self) -> str:

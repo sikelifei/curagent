@@ -128,10 +128,8 @@ class TextCraftSynthEnvironmentTests(unittest.TestCase):
             backend_kwargs={"model_name": "fake-model"},
             tools=environment.tools(),
             termination_check=environment.status,
-            prompt_addendum=environment.agent_prompt,
-            completion_prompt=environment.completion_prompt,
-            delegated_prompt_addendum=environment.delegated_prompt_addendum,
-            delegated_completion_prompt=environment.delegated_completion_prompt,
+            root_prompt=environment.root_prompt,
+            child_prompt=environment.child_prompt,
             delegated_disabled_tools=environment.delegated_disabled_tools,
             max_steps=4,
             max_depth=3,
@@ -152,8 +150,10 @@ class TextCraftSynthEnvironmentTests(unittest.TestCase):
         self.assertIn("`finish(message)`", root_messages[0]["content"])
         self.assertNotIn('answer["ready"]', root_messages[0]["content"])
         self.assertIn('answer["ready"]', child_messages[0]["content"])
-        self.assertNotIn("`finish`:", child_messages[0]["content"])
-        self.assertNotIn("`finish(message)`", child_messages[0]["content"])
+        self.assertIn("`finish(message: str) -> str`", root_messages[0]["content"])
+        self.assertIn("`finish(message: str) -> str`", child_messages[0]["content"])
+        self.assertNotIn("Custom tools:", root_messages[0]["content"])
+        self.assertNotIn("Custom tools:", child_messages[0]["content"])
         self.assertIn(environment.task, root_messages[1]["content"])
         self.assertNotIn(environment.task, child_messages[1]["content"])
         self.assertTrue(

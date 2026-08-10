@@ -12,8 +12,11 @@ from .dataset import (
 from .environment import TextCraftSynthEnvironment
 from .prompts import (
     DEFAULT_TEXTCRAFT_AGENT_PROMPT,
+    DEFAULT_TEXTCRAFT_CHILD_PROMPT,
     DEFAULT_TEXTCRAFT_FORCED_FINAL_PROMPT,
+    DEFAULT_TEXTCRAFT_ROOT_PROMPT,
     DEFAULT_TEXTCRAFT_TASK_TEMPLATE,
+    DEFAULT_TEXTCRAFT_TOOLS_PROMPT,
     build_textcraft_task_prompt,
 )
 from .scoring import TextCraftEvaluation, evaluate_inventory
@@ -22,9 +25,12 @@ __all__ = [
     "DEFAULT_DATASET_NAME",
     "DEFAULT_SPLIT",
     "DEFAULT_TEXTCRAFT_AGENT_PROMPT",
+    "DEFAULT_TEXTCRAFT_CHILD_PROMPT",
     "DEFAULT_TEXTCRAFT_FORCED_FINAL_PROMPT",
     "DEFAULT_TEXTCRAFT_ROOT",
+    "DEFAULT_TEXTCRAFT_ROOT_PROMPT",
     "DEFAULT_TEXTCRAFT_TASK_TEMPLATE",
+    "DEFAULT_TEXTCRAFT_TOOLS_PROMPT",
     "TextCraftDataset",
     "TextCraftEvaluation",
     "TextCraftRecipe",

@@ -19,12 +19,14 @@ from ..registry import register_environment
 from .dataset import WebShopDataset, WebShopSample
 from .prompts import (
     DEFAULT_WEBSHOP_AGENT_PROMPT,
+    DEFAULT_WEBSHOP_CHILD_PROMPT,
     DEFAULT_WEBSHOP_COMPLETION_PROMPT,
     DEFAULT_WEBSHOP_FORCED_FINAL_PROMPT,
     DEFAULT_WEBSHOP_SUBAGENT_FORCED_FINAL_PROMPT,
     DEFAULT_WEBSHOP_SUBAGENT_COMPLETION_PROMPT,
     DEFAULT_WEBSHOP_SUBAGENT_PROMPT,
     DEFAULT_WEBSHOP_TASK_TEMPLATE,
+    DEFAULT_WEBSHOP_ROOT_PROMPT,
 )
 from .tools import build_webshop_tools
 
@@ -94,6 +96,14 @@ class ReCodeWebShopEnvironment(AgentEnvironment):
     @property
     def agent_prompt(self) -> str:
         return DEFAULT_WEBSHOP_AGENT_PROMPT
+
+    @property
+    def root_prompt(self) -> str:
+        return DEFAULT_WEBSHOP_ROOT_PROMPT
+
+    @property
+    def child_prompt(self) -> str:
+        return DEFAULT_WEBSHOP_CHILD_PROMPT
 
     @property
     def forced_final_prompt(self) -> str:

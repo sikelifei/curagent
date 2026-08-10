@@ -17,11 +17,13 @@ from .dataset import (
 )
 from .prompts import (
     DEFAULT_SYNTH_AGENT_PROMPT,
+    DEFAULT_SYNTH_CHILD_PROMPT,
     DEFAULT_SYNTH_FORCED_FINAL_PROMPT,
     DEFAULT_SYNTH_SUBAGENT_FORCED_FINAL_PROMPT,
     DEFAULT_OOLONG_SYNTH_ROOT_COMPLETION_PROMPT,
     DEFAULT_OOLONG_SYNTH_SUBAGENT_COMPLETION_PROMPT,
     DEFAULT_SYNTH_TASK_TEMPLATE,
+    DEFAULT_SYNTH_ROOT_PROMPT,
     build_synth_agent_prompt,
     build_synth_task_prompt,
 )
@@ -97,6 +99,14 @@ class OolongSynthEnvironment(AgentEnvironment):
     @property
     def agent_prompt(self) -> str:
         return self._agent_prompt
+
+    @property
+    def root_prompt(self) -> str:
+        return DEFAULT_SYNTH_ROOT_PROMPT
+
+    @property
+    def child_prompt(self) -> str:
+        return DEFAULT_SYNTH_CHILD_PROMPT
 
     @property
     def delegated_prompt_addendum(self) -> str | None:

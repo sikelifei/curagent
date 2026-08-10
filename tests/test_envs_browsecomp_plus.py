@@ -205,11 +205,8 @@ class BrowseCompPlusEnvironmentTests(unittest.TestCase):
         agent = RecursiveAgent(
             backend_kwargs={"model_name": "unused"},
             tools=environment.tools(),
-            prompt_addendum=environment.agent_prompt,
-            system_prompt=environment.system_prompt,
-            completion_prompt=environment.completion_prompt,
-            delegated_prompt_addendum=environment.delegated_prompt_addendum,
-            delegated_completion_prompt=environment.delegated_completion_prompt,
+            root_prompt=environment.root_prompt,
+            child_prompt=environment.child_prompt,
             delegated_forced_final_prompt=environment.delegated_forced_final_prompt,
             disabled_repl_builtins=environment.disabled_repl_builtins,
             max_depth=1,
@@ -226,29 +223,23 @@ class BrowseCompPlusEnvironmentTests(unittest.TestCase):
         system_prompt = result.trace.system_prompt
         worker_system_prompt = result.trace.children[0].system_prompt
         self.assertNotEqual(worker_system_prompt, system_prompt)
-        self.assertIn(environment.agent_prompt, system_prompt)
-        self.assertIn(environment.agent_prompt, worker_system_prompt)
-        self.assertNotIn("BrowseComp-Plus root", system_prompt)
-        self.assertNotIn("BrowseComp-Plus worker", worker_system_prompt)
+        self.assertEqual(system_prompt, environment.root_prompt)
+        self.assertEqual(worker_system_prompt, environment.child_prompt)
+        self.assertIn("root agent for one BrowseComp-Plus", system_prompt)
+        self.assertIn("child agent for BrowseComp-Plus", worker_system_prompt)
         root_completion = environment.completion_prompt.strip()
         delegated_completion = environment.delegated_completion_prompt.strip()
         self.assertIn(root_completion, system_prompt)
         self.assertNotIn(root_completion, worker_system_prompt)
         self.assertIn(delegated_completion, worker_system_prompt)
         self.assertNotIn(delegated_completion, system_prompt)
-        root_common = system_prompt.removesuffix(root_completion).rstrip()
-        worker_common = worker_system_prompt.removesuffix(
-            delegated_completion
-        ).rstrip()
-        self.assertEqual(root_common, worker_common)
+        self.assertIn("`search(query: str) -> list[dict]`", system_prompt)
+        self.assertIn("`search(query: str) -> list[dict]`", worker_system_prompt)
+        self.assertNotIn("Custom tools:", system_prompt)
+        self.assertNotIn("Custom tools:", worker_system_prompt)
         self.assertIsNone(environment.delegated_prompt_addendum)
         self.assertIn("BrowseComp-Plus", system_prompt)
-        self.assertIn("You are a recursive agent harness", system_prompt)
-        normalized_prompt = " ".join(environment.agent_prompt.split())
-        self.assertIn("delegate focused investigations", normalized_prompt)
-        self.assertIn("Root agents and subagents follow the same strategy", normalized_prompt)
-        self.assertIn("Subagents may recursively delegate", normalized_prompt)
-        self.assertLess(len(environment.agent_prompt), 4000)
+        self.assertNotIn("You are a recursive agent harness", system_prompt)
 
     def test_environment_runner_uses_browsecomp_system_only(self) -> None:
         from tests.fakes import FakeFactory
@@ -286,7 +277,9 @@ class BrowseCompPlusEnvironmentTests(unittest.TestCase):
                 },
             )
 
-        self.assertIn("recursive agent harness", run.system_prompt)
+        self.assertEqual(run.system_prompt, environment.root_prompt)
+        self.assertNotIn("recursive agent harness", run.system_prompt)
+        self.assertNotIn("Custom tools:", run.system_prompt)
         self.assertIn("BrowseComp-Plus", run.system_prompt)
         self.assertEqual(run.agent_result.trace.system_prompt, run.system_prompt)
 

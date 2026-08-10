@@ -354,22 +354,18 @@ def _build_manifest(
 
 def _build_prompt_preview(args: argparse.Namespace, row: dict[str, Any]) -> dict[str, Any]:
     from recursive_agent.envs.oolong_synth import OolongSynthEnvironment
-    from recursive_agent.prompts import FORCED_FINAL_USER, build_initial_user, build_system_prompt
-    from recursive_agent.tools import format_tools_for_prompt, parse_tools
+    from recursive_agent.prompts import FORCED_FINAL_USER
 
     environment = OolongSynthEnvironment(samples=[row])
-    formatted_tools = format_tools_for_prompt(parse_tools(environment.tools()))
+    delegated_task = (
+        "Process the assigned chunk and return concise mergeable text with "
+        "chunk_id, rows processed, and the required statistics."
+    )
     return {
-        "root_system_prompt": build_system_prompt(
-            formatted_tools,
-            prompt_addendum=environment.agent_prompt,
-        ),
-        "root_initial_user_prompt": build_initial_user(environment.task, delegated=False),
-        "delegated_initial_user_wrapper_example": build_initial_user(
-            "Process the assigned chunk and return concise mergeable text with "
-            "chunk_id, rows processed, and the required statistics.",
-            delegated=True,
-        ),
+        "root_prompt": environment.root_prompt,
+        "child_prompt": environment.child_prompt,
+        "root_initial_user_prompt": f"Task:\n{environment.task}",
+        "delegated_initial_user_wrapper_example": f"Delegated task:\n{delegated_task}",
         "child_private_context_fields": [
             "oolong_role",
             "chunk_id",

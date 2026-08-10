@@ -12,8 +12,11 @@ from ..registry import register_environment
 from .harness import DeepDiveHarnessProtocol, DeepDiveSample, PlatoonDeepDiveHarness
 from .prompts import (
     DEFAULT_DEEPDIVE_AGENT_PROMPT,
+    DEFAULT_DEEPDIVE_CHILD_PROMPT,
     DEFAULT_DEEPDIVE_COMPLETION_PROMPT,
     DEFAULT_DEEPDIVE_FORCED_FINAL_PROMPT,
+    DEFAULT_DEEPDIVE_ROOT_PROMPT,
+    build_deepdive_task_prompt,
 )
 
 
@@ -50,7 +53,7 @@ class DeepDiveEnvironment(AgentEnvironment):
 
     @property
     def task(self) -> str:
-        return self.sample.question
+        return build_deepdive_task_prompt(self.sample.question)
 
     @property
     def context(self) -> dict[str, Any]:
@@ -59,6 +62,14 @@ class DeepDiveEnvironment(AgentEnvironment):
     @property
     def agent_prompt(self) -> str:
         return DEFAULT_DEEPDIVE_AGENT_PROMPT
+
+    @property
+    def root_prompt(self) -> str:
+        return DEFAULT_DEEPDIVE_ROOT_PROMPT
+
+    @property
+    def child_prompt(self) -> str:
+        return DEFAULT_DEEPDIVE_CHILD_PROMPT
 
     @property
     def completion_prompt(self) -> str:

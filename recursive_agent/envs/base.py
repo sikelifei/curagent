@@ -33,6 +33,16 @@ class AgentEnvironment(ABC):
         return ""
 
     @property
+    def root_prompt(self) -> str | None:
+        """Return the complete prompt for the root agent, when customized."""
+        return None
+
+    @property
+    def child_prompt(self) -> str | None:
+        """Return the complete prompt for delegated agents, when customized."""
+        return None
+
+    @property
     def system_prompt(self) -> str | None:
         """Return an optional environment-specific base system prompt."""
         return None

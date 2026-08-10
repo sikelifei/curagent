@@ -143,6 +143,65 @@ Return a concise plain-text report for the assigned WebShop analysis. Do not
 use tools, and do not claim that the shopping episode was completed."""
 
 
+DEFAULT_WEBSHOP_TOOLS_PROMPT = """### Available tools
+
+Call tools only from Python in a `repl` block. The root and child prompts use
+this same tool reference.
+
+1. `observe() -> dict`
+   Return the shopping instruction, current page, valid actions, action history,
+   step count, reward, and terminal state.
+   Example: `state = observe()`
+
+2. `act(action: str) -> dict`
+   Execute one `search[...]` or currently valid `click[...]` action and return
+   the updated state. `click[Buy Now]` is the terminal purchase action.
+   Example: `state = act("search[wireless mouse]")`
+
+3. `available_actions() -> list[str]`
+   Return the currently valid WebShop action strings.
+
+4. `episode_report() -> dict`
+   Return the current reward, success flag, step count, and trajectory.
+
+5. `shopping_instruction: str`
+   The immutable shopping instruction for this episode.
+
+6. `spawn_subagent(task: str, context=None) -> str`
+   Run one child agent with an isolated copy of the supplied context.
+
+7. `spawn_subagents(requests: list[dict]) -> list[str]`
+   Run independent child requests concurrently. Each request contains `task`
+   and optional `context`.
+
+REPL variables persist for the current agent. Return exactly one executable
+`repl` block per model step and no text outside it."""
+
+
+DEFAULT_WEBSHOP_ROOT_PROMPT = "\n\n".join(
+    (
+        "You are the root agent for one WebShop benchmark episode.",
+        DEFAULT_WEBSHOP_AGENT_PROMPT.strip(),
+        DEFAULT_WEBSHOP_TOOLS_PROMPT.strip(),
+        DEFAULT_WEBSHOP_COMPLETION_PROMPT.strip(),
+    )
+)
+
+
+DEFAULT_WEBSHOP_CHILD_PROMPT = "\n\n".join(
+    (
+        """You are a child agent for a WebShop benchmark episode. Solve only the
+delegated task in the initial user message. The original shopping task is not
+included unless the parent explicitly passes it in `context`. A private copy of
+that value is available as the REPL variable `context`. Return a self-contained
+result to the parent.""",
+        DEFAULT_WEBSHOP_SUBAGENT_PROMPT.strip(),
+        DEFAULT_WEBSHOP_TOOLS_PROMPT.strip(),
+        DEFAULT_WEBSHOP_SUBAGENT_COMPLETION_PROMPT.strip(),
+    )
+)
+
+
 def build_webshop_task_prompt(
     instruction: str,
     *,
@@ -158,11 +217,14 @@ def build_webshop_task_prompt(
 
 __all__ = [
     "DEFAULT_WEBSHOP_AGENT_PROMPT",
+    "DEFAULT_WEBSHOP_CHILD_PROMPT",
     "DEFAULT_WEBSHOP_COMPLETION_PROMPT",
     "DEFAULT_WEBSHOP_FORCED_FINAL_PROMPT",
     "DEFAULT_WEBSHOP_SUBAGENT_FORCED_FINAL_PROMPT",
     "DEFAULT_WEBSHOP_SUBAGENT_COMPLETION_PROMPT",
     "DEFAULT_WEBSHOP_SUBAGENT_PROMPT",
     "DEFAULT_WEBSHOP_TASK_TEMPLATE",
+    "DEFAULT_WEBSHOP_TOOLS_PROMPT",
+    "DEFAULT_WEBSHOP_ROOT_PROMPT",
     "build_webshop_task_prompt",
 ]

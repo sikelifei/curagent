@@ -121,6 +121,8 @@ class RecursiveAgent:
         termination_check: TerminationCheck | None = None,
         prompt_addendum: str | None = None,
         system_prompt: str | None = None,
+        root_prompt: str | None = None,
+        child_prompt: str | None = None,
         completion_prompt: str | None = None,
         forced_final_prompt: str | None = None,
         delegated_forced_final_prompt: str | None = None,
@@ -144,10 +146,16 @@ class RecursiveAgent:
         )
         self._tools: dict[str, ToolInfo] = parse_tools(tools)
         self._tool_values = tool_values(self._tools)
-        self._formatted_tools = format_tools_for_prompt(self._tools)
         self._prompt_addendum = str(prompt_addendum).strip() if prompt_addendum else None
         self._system_prompt_override = (
             str(system_prompt).strip() if system_prompt else None
+        )
+        self._root_prompt = str(root_prompt).strip() if root_prompt else None
+        self._child_prompt = str(child_prompt).strip() if child_prompt else None
+        self._formatted_tools = (
+            None
+            if self._root_prompt is not None
+            else format_tools_for_prompt(self._tools)
         )
         self._forced_final_prompt = (
             str(forced_final_prompt).strip() if forced_final_prompt else None
@@ -184,7 +192,7 @@ class RecursiveAgent:
                 "max_repl_blocks_per_step must be a positive integer or None"
             )
         self._max_repl_blocks_per_step = max_repl_blocks_per_step
-        self._system_prompt = build_system_prompt(
+        self._system_prompt = self._root_prompt or build_system_prompt(
             self._formatted_tools,
             prompt_addendum=self._prompt_addendum,
             base_prompt=self._system_prompt_override,
@@ -271,35 +279,43 @@ class RecursiveAgent:
             for name, info in self._tools.items()
             if not (delegated and name in self._delegated_disabled_tools)
         }
-        system_prompt = build_system_prompt(
-            format_tools_for_prompt(active_tools),
-            prompt_addendum=(
-                self._delegated_prompt_addendum
-                if delegated and self._delegated_prompt_addendum is not None
-                else self._prompt_addendum
-            ),
-            base_prompt=self._system_prompt_override,
-            completion_prompt=(
-                self._delegated_completion_prompt
-                if delegated
-                else self._completion_prompt
-            ),
-        )
+        complete_prompt = self._child_prompt if delegated else self._root_prompt
+        if complete_prompt is not None:
+            # Environment-owned prompts are already complete. In particular,
+            # tool documentation is handwritten there rather than generated
+            # from the runtime registration mapping.
+            system_prompt = complete_prompt
+        else:
+            system_prompt = build_system_prompt(
+                format_tools_for_prompt(active_tools),
+                prompt_addendum=(
+                    self._delegated_prompt_addendum
+                    if delegated and self._delegated_prompt_addendum is not None
+                    else self._prompt_addendum
+                ),
+                base_prompt=self._system_prompt_override,
+                completion_prompt=(
+                    self._delegated_completion_prompt
+                    if delegated
+                    else self._completion_prompt
+                ),
+            )
         trace.system_prompt = system_prompt
+        if complete_prompt is not None:
+            initial_user = (
+                f"Delegated task:\n{task}" if delegated else f"Task:\n{task}"
+            )
+        else:
+            initial_user = build_initial_user(
+                task,
+                delegated=delegated,
+                delegated_guidance=(
+                    self._delegated_task_prompt if delegated else None
+                ),
+            )
         messages: list[dict[str, str]] = [
             {"role": "system", "content": system_prompt},
-            {
-                "role": "user",
-                "content": build_initial_user(
-                    task,
-                    delegated=parent_trace is not None,
-                    delegated_guidance=(
-                        self._delegated_task_prompt
-                        if delegated
-                        else None
-                    ),
-                ),
-            },
+            {"role": "user", "content": initial_user},
         ]
         latest_response: str | None = None
         local_usage = _UsageAccumulator()

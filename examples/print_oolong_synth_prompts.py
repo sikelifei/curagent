@@ -6,8 +6,7 @@ import argparse
 from pathlib import Path
 
 from recursive_agent.envs.oolong_synth import OolongSynthEnvironment
-from recursive_agent.prompts import FORCED_FINAL_USER, build_initial_user, build_system_prompt
-from recursive_agent.tools import format_tools_for_prompt, parse_tools
+from recursive_agent.prompts import FORCED_FINAL_USER
 
 
 def main() -> None:
@@ -35,20 +34,17 @@ def main() -> None:
         "input_subset": "False",
     }
     environment = OolongSynthEnvironment(samples=[sample])
-    tools = format_tools_for_prompt(parse_tools(environment.tools()))
+    delegated_task = (
+        "Process the assigned chunk and return concise mergeable text "
+        "with chunk_id, rows processed, and the required statistics."
+    )
     sections = [
-        (
-            "ROOT AND CHILD SYSTEM PROMPT",
-            build_system_prompt(tools, prompt_addendum=environment.agent_prompt),
-        ),
-        ("ROOT INITIAL USER PROMPT", build_initial_user(environment.task)),
+        ("ROOT PROMPT", environment.root_prompt),
+        ("CHILD PROMPT", environment.child_prompt),
+        ("ROOT INITIAL USER PROMPT", f"Task:\n{environment.task}"),
         (
             "DELEGATED CHILD INITIAL USER PROMPT",
-            build_initial_user(
-                "Process the assigned chunk and return concise mergeable text "
-                "with chunk_id, rows processed, and the required statistics.",
-                delegated=True,
-            ),
+            f"Delegated task:\n{delegated_task}",
         ),
         (
             "ROOT PRIVATE CONTEXT FIELDS",
