@@ -14,9 +14,9 @@ def build_synth_tools(target: SynthToolTarget) -> dict[str, Any]:
         "submit_answer": {
             "tool": target.submit_answer,
             "description": (
-                "Root-only: submit one final Oolong-Synthetic answer using the exact "
+                "Submit one final Oolong-Synthetic answer using the exact "
                 "prefix requested by the question (Answer:, Label:, User:, or Date:). "
-                "This ends and scores the sample. Delegated agents must never call it."
+                "This ends and scores the sample."
             ),
         }
     }

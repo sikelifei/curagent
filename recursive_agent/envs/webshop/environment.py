@@ -19,7 +19,11 @@ from ..registry import register_environment
 from .dataset import WebShopDataset, WebShopSample
 from .prompts import (
     DEFAULT_WEBSHOP_AGENT_PROMPT,
+    DEFAULT_WEBSHOP_COMPLETION_PROMPT,
     DEFAULT_WEBSHOP_FORCED_FINAL_PROMPT,
+    DEFAULT_WEBSHOP_SUBAGENT_FORCED_FINAL_PROMPT,
+    DEFAULT_WEBSHOP_SUBAGENT_COMPLETION_PROMPT,
+    DEFAULT_WEBSHOP_SUBAGENT_PROMPT,
     DEFAULT_WEBSHOP_TASK_TEMPLATE,
 )
 from .tools import build_webshop_tools
@@ -94,6 +98,26 @@ class ReCodeWebShopEnvironment(AgentEnvironment):
     @property
     def forced_final_prompt(self) -> str:
         return DEFAULT_WEBSHOP_FORCED_FINAL_PROMPT
+
+    @property
+    def completion_prompt(self) -> str:
+        return DEFAULT_WEBSHOP_COMPLETION_PROMPT
+
+    @property
+    def delegated_completion_prompt(self) -> str:
+        return DEFAULT_WEBSHOP_SUBAGENT_COMPLETION_PROMPT
+
+    @property
+    def delegated_prompt_addendum(self) -> str:
+        return DEFAULT_WEBSHOP_SUBAGENT_PROMPT
+
+    @property
+    def delegated_forced_final_prompt(self) -> str:
+        return DEFAULT_WEBSHOP_SUBAGENT_FORCED_FINAL_PROMPT
+
+    @property
+    def delegated_disabled_tools(self) -> frozenset[str]:
+        return frozenset(self._tools)
 
     @property
     def context(self) -> dict[str, Any]:

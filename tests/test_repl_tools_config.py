@@ -11,6 +11,20 @@ from recursive_agent.repl import ReplSession, find_repl_blocks
 
 
 class ReplToolsConfigTests(unittest.TestCase):
+    def test_repl_displays_bare_top_level_expressions(self) -> None:
+        repl = ReplSession(
+            context=None,
+            tools={"lookup": lambda: {"value": 7}},
+            spawn_subagent=lambda task, context=None: "child",
+            spawn_subagents=lambda requests: [],
+        )
+        bare = repl.execute("lookup()")
+        explicit = repl.execute("print(lookup())")
+        expression = repl.execute("x = 40\nx + 2")
+        self.assertEqual(bare.trace.output, "{'value': 7}")
+        self.assertEqual(explicit.trace.output, "{'value': 7}")
+        self.assertEqual(expression.trace.output, "42")
+
     def test_scaffold_and_tools_are_restored_without_clearing_valid_answer(self) -> None:
         marker = object()
         repl = ReplSession(

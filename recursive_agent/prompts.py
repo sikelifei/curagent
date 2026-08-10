@@ -40,8 +40,12 @@ spawn_subagents(requests) -> list[str]
 Run multiple independent sub-agents concurrently. Each request contains `task`
 and optional `context`.
 
-Put the subtask instructions in `task`. Use `context` to pass required
-information or values from the current REPL.
+Put complete, self-contained subtask instructions in task. Clearly state what
+the sub-agent must inspect, compute, return, and how its result will be merged.
+
+Do not merely repeat the parent task or use vague instructions. Break the work
+into a smaller, concrete subtask with the exact output format and all necessary
+constraints.
 
 Each agent has an isolated context and REPL environment. Agents cannot access
 another agent's variables or intermediate state. Any required information must
@@ -76,9 +80,12 @@ substantially equivalent copy of that task.
 Delegate further only when the child can identify a smaller, distinct subtask
 whose result is necessary for completing its own assignment.
 
-### Completion
+"""
 
-`answer` is a reserved completion dictionary provided by the harness.
+
+DEFAULT_ANSWER_COMPLETION_PROMPT = """### Completion
+
+`answer` is the reserved completion dictionary provided by the harness.
 
 Finish by setting:
 
@@ -123,23 +130,35 @@ def build_system_prompt(
     *,
     prompt_addendum: str | None = None,
     base_prompt: str | None = None,
+    completion_prompt: str | None = None,
 ) -> str:
     sections = [str(base_prompt).strip() if base_prompt else SYSTEM_PROMPT]
     if prompt_addendum:
         sections.append(str(prompt_addendum).strip())
     if formatted_tools:
         sections.append(f"Custom tools:\n{formatted_tools}")
+    sections.append(
+        str(completion_prompt).strip()
+        if completion_prompt is not None
+        else DEFAULT_ANSWER_COMPLETION_PROMPT
+    )
     return "\n\n".join(section for section in sections if section)
 
 
 def build_browsecomp_system_prompt() -> str:
     """Build the root BrowseComp system prompt."""
-    return f"{SYSTEM_PROMPT.rstrip()}\n\n{BROWSECOMP_TASK_ROUTING_PROMPT.strip()}"
+    return "\n\n".join(
+        (
+            SYSTEM_PROMPT.rstrip(),
+            BROWSECOMP_TASK_ROUTING_PROMPT.strip(),
+            DEFAULT_ANSWER_COMPLETION_PROMPT.strip(),
+        )
+    )
 
 
 def build_browsecomp_worker_system_prompt() -> str:
     """Build the worker BrowseComp system prompt."""
-    return f"{SYSTEM_PROMPT.rstrip()}\n\n{BROWSECOMP_TASK_ROUTING_PROMPT.strip()}"
+    return build_browsecomp_system_prompt()
 
 
 def build_initial_user(

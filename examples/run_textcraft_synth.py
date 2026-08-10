@@ -30,6 +30,7 @@ def main() -> None:
     parser.add_argument("--difficulty", choices=("easy", "medium", "hard"), default="medium")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--prompt-file")
+    parser.add_argument("--model-name")
     parser.add_argument("--agent-max-steps", type=int, default=25)
     parser.add_argument("--max-depth", type=int, default=12)
     parser.add_argument("--max-concurrent-subagents", type=int, default=4)
@@ -37,6 +38,12 @@ def main() -> None:
     parser.add_argument("--max-run-seconds", type=float, default=900.0)
     parser.add_argument("--max-observation-chars", type=int, default=8000)
     parser.add_argument("--request-timeout", type=float, default=120.0)
+    parser.add_argument(
+        "--max-retries",
+        type=int,
+        default=4,
+        help="OpenAI-compatible client retries for transient API failures.",
+    )
     parser.add_argument("--temperature", type=float, default=0.2)
     parser.add_argument("--max-tokens", type=int, default=2048)
     parser.add_argument("--trace-json")
@@ -100,6 +107,17 @@ def _run_one(
         environment_kwargs["agent_prompt"] = prompt
 
     try:
+        model_overrides = {
+            "timeout": args.request_timeout,
+            "max_retries": args.max_retries,
+            "sampling_args": {
+                "temperature": args.temperature,
+                "max_tokens": args.max_tokens,
+            },
+        }
+        model_name = getattr(args, "model_name", None)
+        if model_name:
+            model_overrides["model_name"] = model_name
         run = run_registered_environment(
             "textcraft_synth",
             model_config=args.config,
@@ -112,17 +130,12 @@ def _run_one(
                 "max_run_seconds": args.max_run_seconds,
                 "max_observation_chars": args.max_observation_chars,
             },
-            model_overrides={
-                "timeout": args.request_timeout,
-                "sampling_args": {
-                    "temperature": args.temperature,
-                    "max_tokens": args.max_tokens,
-                },
-            },
+            model_overrides=model_overrides,
         )
         report = run.environment_report
         trace = run.to_trace_dict()
         metrics = _trace_metrics(trace.get("agent_result", {}).get("trace"))
+        usage = run.agent_result.usage.to_dict()
         return {
             "instance_id": instance_id,
             "ok": True,
@@ -139,21 +152,37 @@ def _run_one(
             "steps": run.agent_result.steps,
             "recursive_children": metrics["children"],
             "max_trace_depth": metrics["max_depth"],
+            "models": sorted((usage.get("model_usage_summaries") or {}).keys()),
             "trace": trace,
         }
     except Exception as exc:
-        return {
+        trace = getattr(exc, "partial_trace", None)
+        report = (trace or {}).get("environment_report") or {}
+        root_trace = ((trace or {}).get("agent_result") or {}).get("trace")
+        metrics = _trace_metrics(root_trace)
+        usage = ((trace or {}).get("agent_result") or {}).get("usage") or {}
+        row = {
             "instance_id": instance_id,
             "ok": False,
             "duration_seconds": time.monotonic() - started,
-            "success": False,
-            "score": 0.0,
-            "steps": 0,
-            "recursive_children": 0,
-            "max_trace_depth": 0,
+            "id": report.get("id"),
+            "difficulty": report.get("difficulty"),
+            "crafting_depth": report.get("crafting_depth"),
+            "success": bool(report.get("success", False)),
+            "score": float(report.get("score", 0.0) or 0.0),
+            "finished": bool(report.get("finished", False)),
+            "craft_calls": int(report.get("craft_calls", 0) or 0),
+            "missing": report.get("missing", {}),
+            "steps": len((root_trace or {}).get("steps") or []),
+            "recursive_children": metrics["children"],
+            "max_trace_depth": metrics["max_depth"],
+            "models": sorted((usage.get("model_usage_summaries") or {}).keys()),
             "error_type": type(exc).__name__,
             "error": str(exc),
         }
+        if trace is not None:
+            row["trace"] = trace
+        return row
 
 
 def _trace_metrics(trace: dict[str, Any] | None) -> dict[str, int]:
@@ -172,6 +201,14 @@ def _trace_metrics(trace: dict[str, Any] | None) -> dict[str, int]:
 
 def _build_summary(rows: list[dict[str, Any]], *, requested: int) -> dict[str, Any]:
     scores = [float(row.get("score", 0.0) or 0.0) for row in rows]
+    models = sorted(
+        {
+            str(model)
+            for row in rows
+            for model in (row.get("models") or [])
+            if str(model).strip()
+        }
+    )
     grouped: dict[str, list[float]] = defaultdict(list)
     for row in rows:
         grouped[str(row.get("difficulty", "unknown"))].append(
@@ -179,7 +216,8 @@ def _build_summary(rows: list[dict[str, Any]], *, requested: int) -> dict[str, A
         )
     return {
         "environment": "textcraft_synth",
-        "model": "deepseek-v4-flash (from config)",
+        "model": models[0] if len(models) == 1 else (models or "unknown"),
+        "models": models,
         "requested_rows": requested,
         "recorded_rows": len(rows),
         "successful_runs": sum(bool(row.get("ok")) for row in rows),
@@ -215,6 +253,8 @@ def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) ->
             parser.error(f"{name.replace('_', '-')} must be positive")
     if args.start_index < 0:
         parser.error("start-index must be non-negative")
+    if args.max_retries < 0:
+        parser.error("max-retries must be non-negative")
 
 
 def _append_jsonl(path: Path, row: dict[str, Any]) -> None:

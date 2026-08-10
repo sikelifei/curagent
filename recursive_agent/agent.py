@@ -19,7 +19,12 @@ from .exceptions import (
     ModelCallError,
     TimeoutExceededError,
 )
-from .prompts import FORCED_FINAL_USER, build_initial_user, build_system_prompt
+from .prompts import (
+    DEFAULT_ANSWER_COMPLETION_PROMPT,
+    FORCED_FINAL_USER,
+    build_initial_user,
+    build_system_prompt,
+)
 from .repl import ReplSession, find_repl_blocks
 from .tools import ToolInfo, format_tools_for_prompt, parse_tools, tool_values
 from .types import (
@@ -115,10 +120,12 @@ class RecursiveAgent:
         termination_check: TerminationCheck | None = None,
         prompt_addendum: str | None = None,
         system_prompt: str | None = None,
+        completion_prompt: str | None = None,
         forced_final_prompt: str | None = None,
         delegated_forced_final_prompt: str | None = None,
         delegated_task_prompt: str | None = None,
         delegated_prompt_addendum: str | None = None,
+        delegated_completion_prompt: str | None = None,
         delegated_disabled_tools: frozenset[str] | set[str] | None = None,
         disabled_repl_builtins: frozenset[str] | set[str] | None = None,
         client_factory: ClientFactory | None = None,
@@ -143,6 +150,11 @@ class RecursiveAgent:
         self._forced_final_prompt = (
             str(forced_final_prompt).strip() if forced_final_prompt else None
         )
+        self._completion_prompt = (
+            str(completion_prompt).strip()
+            if completion_prompt is not None
+            else DEFAULT_ANSWER_COMPLETION_PROMPT
+        )
         self._delegated_forced_final_prompt = (
             str(delegated_forced_final_prompt).strip()
             if delegated_forced_final_prompt
@@ -155,6 +167,11 @@ class RecursiveAgent:
             str(delegated_prompt_addendum).strip()
             if delegated_prompt_addendum
             else None
+        )
+        self._delegated_completion_prompt = (
+            str(delegated_completion_prompt).strip()
+            if delegated_completion_prompt is not None
+            else DEFAULT_ANSWER_COMPLETION_PROMPT
         )
         self._delegated_disabled_tools = frozenset(delegated_disabled_tools or ())
         if max_repl_blocks_per_step is not None and (
@@ -169,6 +186,7 @@ class RecursiveAgent:
             self._formatted_tools,
             prompt_addendum=self._prompt_addendum,
             base_prompt=self._system_prompt_override,
+            completion_prompt=self._completion_prompt,
         )
         self._termination_check = termination_check
         self._disabled_repl_builtins = frozenset(disabled_repl_builtins or ())
@@ -183,7 +201,7 @@ class RecursiveAgent:
 
     @property
     def system_prompt(self) -> str:
-        """Return the exact system prompt sent to this agent and its children."""
+        """Return the exact system prompt used for the top-level run."""
         return self._system_prompt
 
     def cancel(self) -> None:
@@ -244,10 +262,7 @@ class RecursiveAgent:
 
         started = time.perf_counter()
         client = self._make_client()
-        delegated = (
-            parent_trace is not None
-            and self._delegated_prompt_addendum is not None
-        )
+        delegated = parent_trace is not None
         active_tools = {
             name: info
             for name, info in self._tools.items()
@@ -261,6 +276,11 @@ class RecursiveAgent:
                 else self._prompt_addendum
             ),
             base_prompt=self._system_prompt_override,
+            completion_prompt=(
+                self._delegated_completion_prompt
+                if delegated
+                else self._completion_prompt
+            ),
         )
         trace.system_prompt = system_prompt
         messages: list[dict[str, str]] = [
@@ -443,6 +463,10 @@ class RecursiveAgent:
         except BaseException as exc:
             trace.error = f"{type(exc).__name__}: {exc}"
             trace.duration_seconds = time.perf_counter() - started
+            trace.usage = local_usage.snapshot()
+            if depth == 0 or getattr(exc, "agent_trace", None) is None:
+                exc.agent_trace = trace
+                exc.usage = run_context.usage.snapshot()
             raise
         finally:
             close = getattr(client, "close", None)

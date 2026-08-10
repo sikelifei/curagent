@@ -31,8 +31,19 @@ Every child request must pass `question`, `dataset_intro`,
 `context_window_text`, and `chunk_id` in `context`.
 
 
-If delegation, read the returned results once, combine corresponding values
-in the next step, and do not read the original chunks again.
+When delegating, write a clear question-specific child task. State what each
+record is, what must be classified or counted, and the exact partial values to
+return for merging.
+
+Do not use vague instructions, keyword shortcuts, sampling, or searches for
+explicit labels unless the data actually contains them.
+
+Pass expected_rows to each child. Require mergeable results with the processed
+record count, and verify that all returned counts are complete and consistent
+before merging.
+
+If delegation, read the returned results once, combine corresponding values in
+the next step, and do not read the original chunks again.
 
 
 
@@ -51,15 +62,9 @@ source = context["context_window_text"]
 print(len(source))
 ```
 
-REPL output:
-
-```text
-19709
-```
-
 **Step 2**
 
-Assistant sees that `19709 <= 32_768` and prints the complete source:
+Assistant sees that `REPL output <= 32_768` and prints the complete source:
 
 ```repl
 print(source)
@@ -95,15 +100,10 @@ source = context["context_window_text"]
 print(len(source))
 ```
 
-REPL output:
-
-```text
-131072
-```
 
 **Step 2**
 
-Assistant sees that `131072 > 32_768`, splits the source at complete `Date:` record boundaries, and delegates all chunks:
+Assistant sees that `REPL output > 32_768`, splits the source at complete `Date:` record boundaries, and delegates all chunks:
 
 ```repl
 limit = 32_768
@@ -294,16 +294,32 @@ answer["ready"] = True
 '''
 
 
+DEFAULT_OOLONG_SYNTH_ROOT_COMPLETION_PROMPT = r'''### Completion
+
+Once the exact final answer is computed, submit it by calling
+`submit_answer(...)` exactly once.'''
+
+
+DEFAULT_OOLONG_SYNTH_SUBAGENT_COMPLETION_PROMPT = r'''### Completion
+
+Return the mergeable partial result by setting:
+
+```repl
+answer["content"] = result
+answer["ready"] = True
+```'''
+
+
 def build_synth_agent_prompt(*, delegated: bool = False) -> str:
     if not delegated:
         return DEFAULT_OOLONG_SYNTH_PROMPT
     prompt = DEFAULT_OOLONG_SYNTH_PROMPT.split(
         "### Example: direct processing", 1
     )[0]
-    return f"{prompt.rstrip()}\n\n{DEFAULT_OOLONG_SYNTH_CHILD_EXAMPLE}"
+    return f"{prompt.rstrip()}\n\n{DEFAULT_OOLONG_SYNTH_CHILD_EXAMPLE.rstrip()}"
 
 
-DEFAULT_SYNTH_AGENT_PROMPT = DEFAULT_OOLONG_SYNTH_PROMPT
+DEFAULT_SYNTH_AGENT_PROMPT = build_synth_agent_prompt()
 
 
 DEFAULT_SYNTH_TASK_TEMPLATE = """Solve this Oolong-Synthetic benchmark task.
@@ -334,13 +350,22 @@ analysis, Markdown fences, or unsupported alternatives. Do not use tools,
 subagents, or submit_answer now."""
 
 
+DEFAULT_SYNTH_SUBAGENT_FORCED_FINAL_PROMPT = """No working steps remain. Return
+the best mergeable partial result for the assigned Oolong-Synthetic records as
+plain text. Do not use tools, do not call submit_answer, and do not claim
+completion of the full sample."""
+
+
 __all__ = [
     "CHUNK_CHAR_LIMIT",
     "DEFAULT_OOLONG_SYNTH_PROMPT",
     "DEFAULT_OOLONG_SYNTH_CHILD_EXAMPLE",
+    "DEFAULT_OOLONG_SYNTH_ROOT_COMPLETION_PROMPT",
+    "DEFAULT_OOLONG_SYNTH_SUBAGENT_COMPLETION_PROMPT",
     "DEFAULT_SYNTH_AGENT_PROMPT",
     "DEFAULT_SYNTH_TASK_TEMPLATE",
     "DEFAULT_SYNTH_FORCED_FINAL_PROMPT",
+    "DEFAULT_SYNTH_SUBAGENT_FORCED_FINAL_PROMPT",
     "build_synth_agent_prompt",
     "build_synth_task_prompt",
 ]

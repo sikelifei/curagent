@@ -57,10 +57,12 @@ def run_environment(
         "termination_check",
         "prompt_addendum",
         "system_prompt",
+        "completion_prompt",
         "forced_final_prompt",
         "delegated_forced_final_prompt",
         "delegated_task_prompt",
         "delegated_prompt_addendum",
+        "delegated_completion_prompt",
         "delegated_disabled_tools",
         "max_repl_blocks_per_step",
         "disabled_repl_builtins",
@@ -73,7 +75,6 @@ def run_environment(
         task_prompt = environment.task
         initial_context = copy.deepcopy(environment.context)
         tools = environment.tools()
-        is_oolong_synth = environment.name == "oolong_synth"
         backend, backend_kwargs = load_model_config(model_config)
         backend_kwargs = _merge_nested(backend_kwargs, dict(model_overrides or {}))
         agent = RecursiveAgent(
@@ -83,24 +84,41 @@ def run_environment(
             termination_check=environment.status,
             prompt_addendum=environment.agent_prompt,
             system_prompt=environment.system_prompt,
+            completion_prompt=environment.completion_prompt,
             forced_final_prompt=environment.forced_final_prompt,
             delegated_forced_final_prompt=environment.delegated_forced_final_prompt,
             delegated_task_prompt=environment.delegated_task_prompt,
-            delegated_prompt_addendum=(
-                environment.delegated_prompt_addendum
-                if is_oolong_synth
-                else None
-            ),
-            delegated_disabled_tools=(
-                environment.delegated_disabled_tools
-                if is_oolong_synth
-                else frozenset()
-            ),
+            delegated_prompt_addendum=environment.delegated_prompt_addendum,
+            delegated_completion_prompt=environment.delegated_completion_prompt,
+            delegated_disabled_tools=environment.delegated_disabled_tools,
             max_repl_blocks_per_step=environment.max_repl_blocks_per_step,
             disabled_repl_builtins=environment.disabled_repl_builtins,
             **kwargs,
         )
-        result = agent.run(task=task_prompt, context=initial_context)
+        try:
+            result = agent.run(task=task_prompt, context=initial_context)
+        except BaseException as exc:
+            report = environment.report()
+            usage = getattr(exc, "usage", None)
+            exc.partial_trace = {
+                "prompts": {
+                    "system": agent.system_prompt,
+                    "task": task_prompt,
+                    "initial_context": initial_context,
+                },
+                "tools": _describe_tools(tools),
+                "agent_result": {
+                    "answer": None,
+                    "status": "error",
+                    "steps": len(
+                        (getattr(exc, "agent_trace", None) or _EMPTY_TRACE).steps
+                    ),
+                    "usage": usage.to_dict() if usage is not None else {},
+                    "trace": _agent_trace_to_dict(getattr(exc, "agent_trace", None)),
+                },
+                "environment_report": report,
+            }
+            raise
         report = environment.report()
         return EnvironmentRunResult(
             agent_result=result,
@@ -194,3 +212,10 @@ def _agent_trace_to_dict(trace: Any) -> dict[str, Any] | None:
         "error": trace.error,
         "duration_seconds": trace.duration_seconds,
     }
+
+
+class _EmptyTrace:
+    steps: tuple[()] = ()
+
+
+_EMPTY_TRACE = _EmptyTrace()

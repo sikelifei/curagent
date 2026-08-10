@@ -46,10 +46,16 @@ class TextCraftSynthEnvironmentTests(unittest.TestCase):
             self.assertEqual(dataset[0].sample_id, "tiny-0")
             environment = TextCraftSynthEnvironment(data_path=path)
         self.assertIn("textcraft_synth", available_environments())
-        self.assertEqual(environment.task, "Craft the following items: 1x tool\n\nUse the registered crafting tools to complete the task. The environment is\nfinished only after you call `finish(...)`.")
+        self.assertEqual(
+            environment.task,
+            "Craft the following additional items: 1x tool",
+        )
         self.assertIn("shared inventory", DEFAULT_TEXTCRAFT_AGENT_PROMPT)
-        self.assertIn("depth 4", DEFAULT_TEXTCRAFT_AGENT_PROMPT)
-        self.assertIn("reserve the final assembly", DEFAULT_TEXTCRAFT_AGENT_PROMPT)
+        self.assertIn("result_count", DEFAULT_TEXTCRAFT_AGENT_PROMPT)
+        self.assertNotIn("depth 4", DEFAULT_TEXTCRAFT_AGENT_PROMPT)
+        self.assertNotIn("finish(message)", DEFAULT_TEXTCRAFT_AGENT_PROMPT)
+        self.assertIn("finish(message)", environment.completion_prompt)
+        self.assertIn('answer["ready"]', environment.delegated_completion_prompt)
 
     def test_fixed_output_and_existing_target_semantics(self) -> None:
         row = sample_row()
@@ -95,7 +101,7 @@ class TextCraftSynthEnvironmentTests(unittest.TestCase):
         def handler(messages, _timeout):
             task = initial_task(messages)
             assistant_calls = sum(message["role"] == "assistant" for message in messages)
-            if task.startswith("Craft the following items:"):
+            if task.startswith("Craft the following additional items:"):
                 if assistant_calls == 0:
                     return (
                         "```repl\n"
@@ -123,6 +129,10 @@ class TextCraftSynthEnvironmentTests(unittest.TestCase):
             tools=environment.tools(),
             termination_check=environment.status,
             prompt_addendum=environment.agent_prompt,
+            completion_prompt=environment.completion_prompt,
+            delegated_prompt_addendum=environment.delegated_prompt_addendum,
+            delegated_completion_prompt=environment.delegated_completion_prompt,
+            delegated_disabled_tools=environment.delegated_disabled_tools,
             max_steps=4,
             max_depth=3,
             client_factory=factory,
@@ -134,6 +144,23 @@ class TextCraftSynthEnvironmentTests(unittest.TestCase):
         self.assertEqual(len(result.trace.children), 1)
         self.assertEqual(result.trace.children[0].depth, 1)
         self.assertEqual(report["craft_calls"], 2)
+
+        root_messages = factory.calls[0]
+        child_messages = factory.calls[1]
+        self.assertNotEqual(root_messages[0]["content"], child_messages[0]["content"])
+        self.assertIn("### TextCraft-Synth", root_messages[0]["content"])
+        self.assertIn("`finish(message)`", root_messages[0]["content"])
+        self.assertNotIn('answer["ready"]', root_messages[0]["content"])
+        self.assertIn('answer["ready"]', child_messages[0]["content"])
+        self.assertNotIn("`finish`:", child_messages[0]["content"])
+        self.assertNotIn("`finish(message)`", child_messages[0]["content"])
+        self.assertIn(environment.task, root_messages[1]["content"])
+        self.assertNotIn(environment.task, child_messages[1]["content"])
+        self.assertTrue(
+            child_messages[1]["content"].startswith(
+                "Delegated task:\nCraft the ingot intermediate and report."
+            )
+        )
 
 
 if __name__ == "__main__":

@@ -18,6 +18,9 @@ from .dataset import (
 from .prompts import (
     DEFAULT_SYNTH_AGENT_PROMPT,
     DEFAULT_SYNTH_FORCED_FINAL_PROMPT,
+    DEFAULT_SYNTH_SUBAGENT_FORCED_FINAL_PROMPT,
+    DEFAULT_OOLONG_SYNTH_ROOT_COMPLETION_PROMPT,
+    DEFAULT_OOLONG_SYNTH_SUBAGENT_COMPLETION_PROMPT,
     DEFAULT_SYNTH_TASK_TEMPLATE,
     build_synth_agent_prompt,
     build_synth_task_prompt,
@@ -106,6 +109,18 @@ class OolongSynthEnvironment(AgentEnvironment):
     @property
     def forced_final_prompt(self) -> str:
         return DEFAULT_SYNTH_FORCED_FINAL_PROMPT
+
+    @property
+    def completion_prompt(self) -> str:
+        return DEFAULT_OOLONG_SYNTH_ROOT_COMPLETION_PROMPT
+
+    @property
+    def delegated_completion_prompt(self) -> str:
+        return DEFAULT_OOLONG_SYNTH_SUBAGENT_COMPLETION_PROMPT
+
+    @property
+    def delegated_forced_final_prompt(self) -> str:
+        return DEFAULT_SYNTH_SUBAGENT_FORCED_FINAL_PROMPT
 
     @property
     def max_repl_blocks_per_step(self) -> int | None:

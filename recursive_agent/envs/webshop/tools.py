@@ -31,7 +31,8 @@ def build_webshop_tools(target: WebShopToolTarget) -> dict[str, Any]:
             "tool": target.act,
             "description": (
                 "Execute one WebShop search[...] or currently valid click[...] action and "
-                "return the updated state. Print the result."
+                "return the updated state. click[Buy Now] is the finish action and makes "
+                "the episode terminal. Print the result."
             ),
         },
         "available_actions": {
@@ -47,4 +48,3 @@ def build_webshop_tools(target: WebShopToolTarget) -> dict[str, Any]:
             "description": "The immutable shopping instruction for this episode.",
         },
     }
-

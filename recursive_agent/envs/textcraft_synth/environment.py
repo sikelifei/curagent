@@ -19,8 +19,11 @@ from .dataset import (
 )
 from .prompts import (
     DEFAULT_TEXTCRAFT_AGENT_PROMPT,
-    DEFAULT_TEXTCRAFT_DELEGATED_FORCED_FINAL_PROMPT,
+    DEFAULT_TEXTCRAFT_COMPLETION_PROMPT,
     DEFAULT_TEXTCRAFT_FORCED_FINAL_PROMPT,
+    DEFAULT_TEXTCRAFT_SUBAGENT_FORCED_FINAL_PROMPT,
+    DEFAULT_TEXTCRAFT_SUBAGENT_COMPLETION_PROMPT,
+    DEFAULT_TEXTCRAFT_SUBAGENT_PROMPT,
     DEFAULT_TEXTCRAFT_TASK_TEMPLATE,
     build_textcraft_task_prompt,
 )
@@ -96,8 +99,24 @@ class TextCraftSynthEnvironment(AgentEnvironment):
         return DEFAULT_TEXTCRAFT_FORCED_FINAL_PROMPT
 
     @property
+    def completion_prompt(self) -> str:
+        return DEFAULT_TEXTCRAFT_COMPLETION_PROMPT
+
+    @property
+    def delegated_completion_prompt(self) -> str:
+        return DEFAULT_TEXTCRAFT_SUBAGENT_COMPLETION_PROMPT
+
+    @property
+    def delegated_prompt_addendum(self) -> str:
+        return DEFAULT_TEXTCRAFT_SUBAGENT_PROMPT
+
+    @property
     def delegated_forced_final_prompt(self) -> str:
-        return DEFAULT_TEXTCRAFT_DELEGATED_FORCED_FINAL_PROMPT
+        return DEFAULT_TEXTCRAFT_SUBAGENT_FORCED_FINAL_PROMPT
+
+    @property
+    def delegated_disabled_tools(self) -> frozenset[str]:
+        return frozenset({"finish"})
 
     @property
     def context(self) -> dict[str, Any]:

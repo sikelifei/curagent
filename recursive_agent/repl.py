@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import builtins
 import io
 import time
@@ -173,10 +174,28 @@ class ReplSession:
             kwargs["file"] = stdout
             builtins.print(*args, **kwargs)
 
+        def local_display(value: Any) -> None:
+            if value is not None:
+                local_print(repr(value))
+
         self.namespace["print"] = local_print
+        self.namespace["__repl_display__"] = local_display
         error: str | None = None
         try:
-            exec(code, self.namespace, self.namespace)
+            tree = ast.parse(code, mode="exec")
+            for index, statement in enumerate(tree.body):
+                if not isinstance(statement, ast.Expr):
+                    continue
+                displayed = ast.Expr(
+                    value=ast.Call(
+                        func=ast.Name(id="__repl_display__", ctx=ast.Load()),
+                        args=[statement.value],
+                        keywords=[],
+                    )
+                )
+                tree.body[index] = ast.copy_location(displayed, statement)
+            ast.fix_missing_locations(tree)
+            exec(compile(tree, "<repl>", "exec"), self.namespace, self.namespace)
         except Exception as exc:
             error = f"Error: {type(exc).__name__}: {exc}"
 
@@ -232,6 +251,7 @@ class ReplSession:
         self.namespace["__builtins__"] = dict(self._allowed_builtins)
         self.namespace["__name__"] = "__main__"
         self.namespace.pop("print", None)
+        self.namespace.pop("__repl_display__", None)
         self.namespace.update(self._builtins)
         self.namespace.update(self._tools)
 

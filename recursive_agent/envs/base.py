@@ -38,6 +38,16 @@ class AgentEnvironment(ABC):
         return None
 
     @property
+    def completion_prompt(self) -> str | None:
+        """Return optional completion instructions for the environment run."""
+        return None
+
+    @property
+    def delegated_completion_prompt(self) -> str | None:
+        """Return optional completion instructions for assigned work."""
+        return None
+
+    @property
     def forced_final_prompt(self) -> str | None:
         """Return an optional environment-specific forced-final prompt."""
         return None

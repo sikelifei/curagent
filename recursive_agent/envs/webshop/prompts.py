@@ -13,9 +13,9 @@ result = act("search[wireless mouse under 30 dollars]")
 ```
 
 `observe()` returns the current page and `valid_actions`.
-Use the latest state returned by observe() or act() before choosing an action.
-Call observe() initially, after an invalid action, or when the current state is
-missing or stale.
+Call observe() initially. After each successful act(), use the returned state
+as the current observation. Call observe() again only after an invalid action
+or when the current state is unavailable.
 
 
 Replace example values with exact terms and labels from the current observation.
@@ -98,6 +98,27 @@ print(state)
 
 """
 
+DEFAULT_WEBSHOP_SUBAGENT_PROMPT = """### WebShop analysis
+
+Analyze only the supplied shopping instruction and page snapshot. Do not
+operate or finish the WebShop episode. Return the requested comparison or
+recommendation.
+"""
+
+DEFAULT_WEBSHOP_COMPLETION_PROMPT = """### Completion
+
+Complete the episode only by operating WebShop until
+`act("click[Buy Now]")` makes the environment terminal."""
+
+DEFAULT_WEBSHOP_SUBAGENT_COMPLETION_PROMPT = """### Completion
+
+Return the requested analysis by setting:
+
+```repl
+answer["content"] = result
+answer["ready"] = True
+```"""
+
 DEFAULT_WEBSHOP_TASK_TEMPLATE = """Complete this WebShop shopping episode.
 
 Shopping instruction:
@@ -117,6 +138,10 @@ The actual purchase action in this environment is `act("click[Buy Now]")`;
 environment reached the terminal Buy Now state. Do not use tools, subagents, or
 the BrowseComp answer format."""
 
+DEFAULT_WEBSHOP_SUBAGENT_FORCED_FINAL_PROMPT = """No working steps remain.
+Return a concise plain-text report for the assigned WebShop analysis. Do not
+use tools, and do not claim that the shopping episode was completed."""
+
 
 def build_webshop_task_prompt(
     instruction: str,
@@ -129,3 +154,15 @@ def build_webshop_task_prompt(
     if "{instruction}" not in template:
         raise ValueError("WebShop prompt template must contain {instruction}")
     return template.replace("{instruction}", instruction).strip()
+
+
+__all__ = [
+    "DEFAULT_WEBSHOP_AGENT_PROMPT",
+    "DEFAULT_WEBSHOP_COMPLETION_PROMPT",
+    "DEFAULT_WEBSHOP_FORCED_FINAL_PROMPT",
+    "DEFAULT_WEBSHOP_SUBAGENT_FORCED_FINAL_PROMPT",
+    "DEFAULT_WEBSHOP_SUBAGENT_COMPLETION_PROMPT",
+    "DEFAULT_WEBSHOP_SUBAGENT_PROMPT",
+    "DEFAULT_WEBSHOP_TASK_TEMPLATE",
+    "build_webshop_task_prompt",
+]

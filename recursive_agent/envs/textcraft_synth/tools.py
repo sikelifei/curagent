@@ -43,8 +43,7 @@ def build_textcraft_tools(target: TextCraftToolTarget) -> dict[str, Any]:
             "tool": target.finish,
             "description": (
                 "Submit a short completion message. The episode terminates only "
-                "when every requested target is present; an intermediate child "
-                "should return a report instead."
+                "when every requested target is present."
             ),
         },
     }
