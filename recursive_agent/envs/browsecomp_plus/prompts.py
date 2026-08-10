@@ -2,98 +2,123 @@
 
 from __future__ import annotations
 
-from ...prompts import BROWSECOMP_TASK_ROUTING_PROMPT, SYSTEM_PROMPT
 from .dataset import BrowseCompQuery
 
 
-# Root and delegated agents deliberately share the same base system prompt.
-# BrowseComp-specific behavior is supplied as the environment addendum below.
-DEFAULT_BROWSECOMP_SYSTEM_PROMPT = SYSTEM_PROMPT
-DEFAULT_BROWSECOMP_WORKER_SYSTEM_PROMPT = SYSTEM_PROMPT
-DEFAULT_BROWSECOMP_AGENT_PROMPT = r"""## BrowseComp fixed-corpus policy
+DEFAULT_BROWSECOMP_AGENT_PROMPT = r"""### BrowseComp-Plus evidence search
 
-These rules override generic task routing for this environment. Multiple clues
-about one unknown entity form one linked evidence chain; they are not independent
-merely because they are listed separately.
+You are a deep research agent. You need to answer the given question by interact
+ing with a search engine, using the search tool provided. Please perform reasoning and
+use the tool step by step, in an interleaved manner. You may use the search tool multiple times.
 
-Until a forced-final instruction, every response must contain exactly one
-executable block and no other text:
+Available in the REPL:
 
 ```repl
-# plain Python; one action only
+results = search(query)
+
+report = spawn_subagent(task, context=None)
+
+reports = spawn_subagents([
+    {"task": task1, "context": context1},
+    {"task": task2, "context": context2},
+])
 ```
 
-Never use <repl>, nested fences, or multiple blocks. Each turn may perform only
-one action: one search call, one spawn_subagent/spawn_subagents call, or setting
-answer. Never call search inside a loop or batch several searches. Observe the
-result before choosing the next action.
-
-Search the most discriminative linked clue first, then verify remaining clues
-against the candidate. Delegate only when at least two independent unresolved
-branches exist. Any node may delegate. Pass a narrow objective plus observed
-leads, docids, and exclusions; never pass the whole question.
-
-Use at most four distinct queries per node. Never repeat a query or use a docid
-as a query. Stop after decisive evidence or two successful searches with no new
-candidate or useful phrase.
-
-Use only snippets and docids actually observed. A failed call is ERROR, never
-NOT_FOUND. Workers return compact reports. The root verifies reports and sets
-exactly three lines: Explanation, Exact Answer, Confidence."""
+"""
 
 
-DEFAULT_BROWSECOMP_WORKER_PROMPT = r"""Return the assigned objective through
-answer["content"] using exactly:
+DEFAULT_BROWSECOMP_ROOT_COMPLETION_PROMPT = r"""### Completion
+
+Finish only after combining the available evidence and checking the selected
+answer against the original question.
+
+Set `answer["content"]` to exactly three lines:
+
+Explanation: <concise evidence-based explanation with useful docids>
+Exact Answer: <answer>
+Confidence: <0-100%>
+
+Then set `answer["ready"] = True`.
+"""
+
+
+DEFAULT_BROWSECOMP_WORKER_COMPLETION_PROMPT = r"""### Completion
+
+Return the evidence needed by the parent to continue or combine the
+investigation.
+
+Set `answer["content"]` to exactly:
 
 WORKER_REPORT
 Status: VERIFIED | PARTIAL | NOT_FOUND | CONFLICT | ERROR
 Objective: <assigned objective>
-Candidates: <names or NONE>
+Findings: <relevant candidates or facts, or NONE>
 Evidence: <supported claims with docids, or NONE>
-Queries tried: <compact list>
-Unresolved: <missing facts or NONE>
+Contradictions: <contradictory claims with docids, or NONE>
+Unresolved: <remaining constraints or questions, or NONE>
+Useful leads: <names, dates, phrases, or follow-up lexical directions, or NONE>
+Queries tried: <important queries only>
 
-Use NOT_FOUND only after successful searches. Use ERROR for tool or execution
-failure. Never include unobserved claims or docids."""
+Use VERIFIED only when the assigned objective is supported by evidence.
+Use PARTIAL when useful evidence was found but the objective remains unresolved.
+Use NOT_FOUND only after successful searches found no supporting evidence.
+Use CONFLICT when retrieved evidence materially disagrees.
+Use ERROR only for tool or execution failure.
+
+Never include unobserved claims or docids.
+
+Then set `answer["ready"] = True`.
+"""
 
 
-DEFAULT_BROWSECOMP_TASK_TEMPLATE = """Answer this evidence-seeking question
-using only the fixed BrowseComp-Plus BM25 corpus.
+DEFAULT_BROWSECOMP_TASK_TEMPLATE = r"""Answer this evidence-seeking question
+using only the fixed BrowseComp-Plus corpus.
 
 Question:
 {query}
 
-Find a candidate from the strongest linked clues, verify the remaining criteria,
-and return exactly:
-Explanation: <brief explanation with citations>
-Exact Answer: <shortest unambiguous answer>
-Confidence: <0-100%>"""
+Resolve the constraints, combine the evidence, and verify the selected answer.
+
+Return exactly:
+Explanation: <concise evidence-based explanation with useful docids>
+Exact Answer: <answer>
+Confidence: <0-100%>
+"""
 
 
-DEFAULT_BROWSECOMP_FORCED_FINAL_PROMPT = """FINAL FORMAT OVERRIDE. Return exactly
-three newline-separated lines and nothing else:
+DEFAULT_BROWSECOMP_FORCED_FINAL_PROMPT = r"""FINAL FORMAT OVERRIDE.
 
-Explanation: <brief explanation using only observed citations>
-Exact Answer: <shortest supported answer>
+Return exactly three newline-separated lines and nothing else:
+
+Explanation: <concise evidence-based explanation with useful docids>
+Exact Answer: <answer>
 Confidence: <0-100%>
 
-Never invent evidence or citations. If no answer is supported, return:
+Never invent evidence or citations.
+
+If no answer is sufficiently supported, return exactly:
 Explanation: No supported answer was retrieved
 Exact Answer: Unable to determine
-Confidence: 0%"""
+Confidence: 0%
+"""
 
 
-DEFAULT_BROWSECOMP_WORKER_FORCED_FINAL_PROMPT = """Return only:
+DEFAULT_BROWSECOMP_WORKER_FORCED_FINAL_PROMPT = r"""Return only:
 
 WORKER_REPORT
 Status: VERIFIED | PARTIAL | NOT_FOUND | CONFLICT | ERROR
 Objective: <assigned objective>
-Candidates: <names or NONE>
-Evidence: <observed claims with docids, or NONE>
-Queries tried: <compact list>
-Unresolved: <missing facts or NONE>
+Findings: <relevant candidates or facts, or NONE>
+Evidence: <supported claims with docids, or NONE>
+Contradictions: <contradictory claims with docids, or NONE>
+Unresolved: <remaining questions, or NONE>
+Useful leads: <names, dates, phrases, or follow-up lexical directions, or NONE>
+Queries tried: <important queries only>
 
-NOT_FOUND requires a successful search. Tool or execution failure is ERROR."""
+NOT_FOUND requires successful searches.
+Tool or execution failure is ERROR.
+Never invent claims or docids.
+"""
 
 
 def build_browsecomp_task_prompt(
@@ -102,15 +127,16 @@ def build_browsecomp_task_prompt(
     template: str = DEFAULT_BROWSECOMP_TASK_TEMPLATE,
 ) -> str:
     if "{query}" not in template:
-        raise ValueError("BrowseComp-Plus task template must contain {query}")
+        raise ValueError(
+            "BrowseComp-Plus task template must contain {query}"
+        )
     return template.format(query=sample.query).strip()
 
 
 __all__ = [
-    "DEFAULT_BROWSECOMP_SYSTEM_PROMPT",
-    "DEFAULT_BROWSECOMP_WORKER_SYSTEM_PROMPT",
     "DEFAULT_BROWSECOMP_AGENT_PROMPT",
-    "DEFAULT_BROWSECOMP_WORKER_PROMPT",
+    "DEFAULT_BROWSECOMP_ROOT_COMPLETION_PROMPT",
+    "DEFAULT_BROWSECOMP_WORKER_COMPLETION_PROMPT",
     "DEFAULT_BROWSECOMP_TASK_TEMPLATE",
     "DEFAULT_BROWSECOMP_FORCED_FINAL_PROMPT",
     "DEFAULT_BROWSECOMP_WORKER_FORCED_FINAL_PROMPT",

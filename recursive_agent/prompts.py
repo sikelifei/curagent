@@ -27,13 +27,13 @@ REPL variables persist within the current agent.
 
 Sub-agents must be called inside a `repl` block.
 
-```text
+```repl
 spawn_subagent(task, context=None) -> str
 ```
 
 Run one fresh sub-agent.
 
-```text
+```repl
 spawn_subagents(requests) -> list[str]
 ```
 
@@ -96,31 +96,6 @@ answer["ready"] = True
 """
 
 
-BROWSECOMP_TASK_ROUTING_PROMPT = """## BrowseComp evidence search
-
-Use only the fixed corpus. Your first response must be one executable `repl`
-block, not a plan or answer.
-
-For the root, delegate corpus search: create one worker for one linked evidence
-chain, or 2-4 workers for genuinely independent constraints. Give each worker a
-narrow objective, useful leads, and exclusions; never repeat the full question.
-
-For a worker, search its assigned objective. Recurse only when search results
-reveal two independent narrower checks. Keep results in REPL variables, print
-short snippets, and record docids. Do not repeat queries, search docids as
-documents, or issue more than 4 distinct queries without reporting.
-
-Stop after decisive evidence or two searches with no new lead. Reports must
-separate candidates, supported claims, docids, and unresolved facts. Treat child
-reports as evidence to verify, not as truth. The root returns the final answer;
-delegated nodes return a compact worker report."""
-
-# Kept as aliases for callers that still import the old names.
-BROWSECOMP_ROOT_TASK_ROUTING_PROMPT = BROWSECOMP_TASK_ROUTING_PROMPT
-BROWSECOMP_WORKER_TASK_ROUTING_PROMPT = BROWSECOMP_TASK_ROUTING_PROMPT
-
-
-
 FORCED_FINAL_USER = """No working steps remain. Return the best final answer now as plain text.
 Do not use the REPL, tools, or subagents."""
 
@@ -143,22 +118,6 @@ def build_system_prompt(
         else DEFAULT_ANSWER_COMPLETION_PROMPT
     )
     return "\n\n".join(section for section in sections if section)
-
-
-def build_browsecomp_system_prompt() -> str:
-    """Build the root BrowseComp system prompt."""
-    return "\n\n".join(
-        (
-            SYSTEM_PROMPT.rstrip(),
-            BROWSECOMP_TASK_ROUTING_PROMPT.strip(),
-            DEFAULT_ANSWER_COMPLETION_PROMPT.strip(),
-        )
-    )
-
-
-def build_browsecomp_worker_system_prompt() -> str:
-    """Build the worker BrowseComp system prompt."""
-    return build_browsecomp_system_prompt()
 
 
 def build_initial_user(

@@ -6,6 +6,7 @@ import argparse
 import ast
 import json
 import re
+import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -140,6 +141,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-run-seconds", type=float, default=1800.0)
     parser.add_argument("--max-observation-chars", type=int, default=16000)
     parser.add_argument("--bm25-timeout", type=float, default=60.0)
+    parser.add_argument("--snippet-max-chars", type=int, default=1000)
     parser.add_argument("--request-timeout", type=float, default=None)
     parser.add_argument("--temperature", type=float, default=None)
     parser.add_argument("--top-p", type=float, default=None)
@@ -173,6 +175,7 @@ def _validate_args(
         "max-run-seconds": args.max_run_seconds,
         "max-observation-chars": args.max_observation_chars,
         "bm25-timeout": args.bm25_timeout,
+        "snippet-max-chars": args.snippet_max_chars,
         "judge-attempts": args.judge_attempts,
     }
     for name, value in positive.items():
@@ -196,12 +199,23 @@ def _run_and_persist(
     trajectory_path = trajectories_dir / (
         Path(_run_filename(sample.query_id)).stem + "_trajectory.json"
     )
+    steps_path = logs_dir / (
+        Path(_run_filename(sample.query_id)).stem + "_steps.jsonl"
+    )
+    steps_path.parent.mkdir(parents=True, exist_ok=True)
+    steps_path.write_text("", encoding="utf-8")
+    step_log_lock = threading.Lock()
+
+    def record_step(trace: Any, step: Any) -> None:
+        _append_live_step(steps_path, step_log_lock, sample.query_id, trace, step)
+
     trace_payload: dict[str, Any] | None = None
     environment = BrowseCompPlusEnvironment(
         sample=sample,
         bm25_url=args.bm25_url,
         max_search_calls=args.max_search_calls,
         bm25_timeout=args.bm25_timeout,
+        snippet_max_chars=args.snippet_max_chars,
     )
     stats = {
         "subagent_count": 0,
@@ -221,6 +235,7 @@ def _run_and_persist(
                 "max_subagents_per_agent": args.max_subagents_per_agent,
                 "max_run_seconds": args.max_run_seconds,
                 "max_observation_chars": args.max_observation_chars,
+                "step_callback": record_step,
             },
             model_overrides=_model_overrides(args),
         )
@@ -278,6 +293,14 @@ def _run_and_persist(
             local_judge=local_judge,
         )
     except Exception as exc:
+        partial_trace = getattr(exc, "partial_trace", None)
+        if isinstance(partial_trace, dict):
+            trace_payload = partial_trace
+            partial_agent_trace = (
+                partial_trace.get("agent_result", {}).get("trace")
+            )
+            stats = analyze_recursive_trace(partial_agent_trace)
+            _write_json(trajectory_path, partial_trace)
         snapshot = environment.trace.snapshot()
         record = _error_record(
             args=args,
@@ -305,6 +328,62 @@ def _run_and_persist(
         flush=True,
     )
     return record
+
+
+def _append_live_step(
+    path: Path,
+    lock: threading.Lock,
+    query_id: str,
+    trace: Any,
+    step: Any,
+) -> None:
+    """Append one completed root or delegated step while an episode is running."""
+    executions = []
+    call_names: list[str] = []
+    for execution in step.code_executions:
+        code = str(execution.code)
+        executions.append(
+            {
+                "code": code,
+                "stdout": execution.output,
+                "error": execution.error,
+                "variables": list(execution.variables),
+                "duration_seconds": execution.duration_seconds,
+            }
+        )
+        try:
+            tree = ast.parse(code)
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                if node.func.id not in call_names:
+                    call_names.append(node.func.id)
+    event = {
+        "timestamp": time.time(),
+        "query_id": query_id,
+        "agent_id": trace.agent_id,
+        "parent_id": trace.parent_id,
+        "depth": trace.depth,
+        "task": trace.task,
+        "step": step.number,
+        "response": step.response,
+        "model_observation": step.model_observation,
+        "observation_truncated": step.observation_truncated,
+        "code_executions": executions,
+        "duration_seconds": step.duration_seconds,
+    }
+    with lock:
+        with path.open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps(event, ensure_ascii=False) + "\n")
+    role = "root" if trace.parent_id is None else f"depth={trace.depth}"
+    calls = ",".join(call_names) if call_names else "no_repl_call"
+    errors = sum(bool(item["error"]) for item in executions)
+    print(
+        f"query_id={query_id} {role} step={step.number} "
+        f"calls={calls} errors={errors} duration={step.duration_seconds:.2f}s",
+        flush=True,
+    )
 
 
 def _write_simple_run_log(

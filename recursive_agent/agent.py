@@ -40,6 +40,7 @@ from .types import (
 
 ClientFactory = Callable[[str, dict[str, Any]], ModelClient]
 TerminationCheck = Callable[[], EnvironmentStatus | dict[str, Any] | Any]
+StepCallback = Callable[[AgentTrace, AgentStep], None]
 
 
 class _UsageAccumulator:
@@ -128,6 +129,7 @@ class RecursiveAgent:
         delegated_completion_prompt: str | None = None,
         delegated_disabled_tools: frozenset[str] | set[str] | None = None,
         disabled_repl_builtins: frozenset[str] | set[str] | None = None,
+        step_callback: StepCallback | None = None,
         client_factory: ClientFactory | None = None,
     ) -> None:
         self.config = AgentConfig(
@@ -190,6 +192,7 @@ class RecursiveAgent:
         )
         self._termination_check = termination_check
         self._disabled_repl_builtins = frozenset(disabled_repl_builtins or ())
+        self._step_callback = step_callback
         self._client_factory = client_factory or clients.get_client
         self._active_lock = threading.Lock()
         self._active_runs: dict[str, _RunContext] = {}
@@ -376,8 +379,19 @@ class RecursiveAgent:
                 if self._max_repl_blocks_per_step is not None:
                     code_blocks = code_blocks[: self._max_repl_blocks_per_step]
                 if not code_blocks:
-                    messages.append({"role": "user", "content": "Continue."})
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                "Format error: the response contained no executable "
+                                "`repl` block. Continue by returning exactly one "
+                                "```repl``` block with the next Python action and no "
+                                "text outside it."
+                            ),
+                        }
+                    )
                     step_trace.duration_seconds = time.perf_counter() - step_started
+                    self._notify_step(trace, step_trace)
                     continue
 
                 observations: list[str] = []
@@ -395,6 +409,7 @@ class RecursiveAgent:
 
                     if execution.answer_ready:
                         step_trace.duration_seconds = time.perf_counter() - step_started
+                        self._notify_step(trace, step_trace)
                         return self._finish(
                             answer=execution.answer_content or "",
                             status="completed",
@@ -409,6 +424,7 @@ class RecursiveAgent:
                     run_context.check()
                     if environment.done:
                         step_trace.duration_seconds = time.perf_counter() - step_started
+                        self._notify_step(trace, step_trace)
                         if environment.final_answer is not None:
                             return self._finish(
                                 answer=str(environment.final_answer),
@@ -449,6 +465,7 @@ class RecursiveAgent:
                 step_trace.observation_truncated = was_truncated
                 messages.append({"role": "user", "content": model_observation})
                 step_trace.duration_seconds = time.perf_counter() - step_started
+                self._notify_step(trace, step_trace)
 
             return self._forced_final(
                 client=client,
@@ -475,6 +492,15 @@ class RecursiveAgent:
                     close()
                 except Exception:
                     pass
+
+    def _notify_step(self, trace: AgentTrace, step: AgentStep) -> None:
+        """Report one completed model/REPL step without affecting the run."""
+        if self._step_callback is None:
+            return
+        try:
+            self._step_callback(trace, step)
+        except Exception:
+            pass
 
     def _forced_final(
         self,

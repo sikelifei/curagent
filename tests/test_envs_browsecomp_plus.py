@@ -68,6 +68,13 @@ class BrowseCompPlusEnvironmentTests(unittest.TestCase):
             [{"docid": "9", "snippet": "x"}],
         )
 
+    def test_bm25_payload_truncates_snippets_by_characters(self) -> None:
+        results = normalize_search_results(
+            [{"docid": "doc", "score": 1, "snippet": "abcdefgh"}],
+            snippet_max_chars=5,
+        )
+        self.assertEqual(results[0]["snippet"], "abcde")
+
     def test_empty_search_result_does_not_crash_environment(self) -> None:
         client = SimpleNamespace(search=lambda query: [])
         environment = BrowseCompPlusEnvironment(
@@ -200,6 +207,9 @@ class BrowseCompPlusEnvironmentTests(unittest.TestCase):
             tools=environment.tools(),
             prompt_addendum=environment.agent_prompt,
             system_prompt=environment.system_prompt,
+            completion_prompt=environment.completion_prompt,
+            delegated_prompt_addendum=environment.delegated_prompt_addendum,
+            delegated_completion_prompt=environment.delegated_completion_prompt,
             delegated_forced_final_prompt=environment.delegated_forced_final_prompt,
             disabled_repl_builtins=environment.disabled_repl_builtins,
             max_depth=1,
@@ -214,13 +224,30 @@ class BrowseCompPlusEnvironmentTests(unittest.TestCase):
         self.assertTrue(stats["root_used_search"])
         self.assertTrue(stats["subagent_used_search"])
         system_prompt = result.trace.system_prompt
-        self.assertEqual(result.trace.children[0].system_prompt, system_prompt)
+        worker_system_prompt = result.trace.children[0].system_prompt
+        self.assertNotEqual(worker_system_prompt, system_prompt)
+        self.assertIn(environment.agent_prompt, system_prompt)
+        self.assertIn(environment.agent_prompt, worker_system_prompt)
+        self.assertNotIn("BrowseComp-Plus root", system_prompt)
+        self.assertNotIn("BrowseComp-Plus worker", worker_system_prompt)
+        root_completion = environment.completion_prompt.strip()
+        delegated_completion = environment.delegated_completion_prompt.strip()
+        self.assertIn(root_completion, system_prompt)
+        self.assertNotIn(root_completion, worker_system_prompt)
+        self.assertIn(delegated_completion, worker_system_prompt)
+        self.assertNotIn(delegated_completion, system_prompt)
+        root_common = system_prompt.removesuffix(root_completion).rstrip()
+        worker_common = worker_system_prompt.removesuffix(
+            delegated_completion
+        ).rstrip()
+        self.assertEqual(root_common, worker_common)
+        self.assertIsNone(environment.delegated_prompt_addendum)
         self.assertIn("BrowseComp-Plus", system_prompt)
         self.assertIn("You are a recursive agent harness", system_prompt)
         normalized_prompt = " ".join(environment.agent_prompt.split())
-        self.assertIn("narrow objective", normalized_prompt)
-        self.assertIn("The root verifies reports", normalized_prompt)
-        self.assertIn("sets exactly three lines", normalized_prompt)
+        self.assertIn("delegate focused investigations", normalized_prompt)
+        self.assertIn("Root agents and subagents follow the same strategy", normalized_prompt)
+        self.assertIn("Subagents may recursively delegate", normalized_prompt)
         self.assertLess(len(environment.agent_prompt), 4000)
 
     def test_environment_runner_uses_browsecomp_system_only(self) -> None:

@@ -8,6 +8,7 @@ from .trace_analysis import aggregate_trace_metrics, analyze_environment_trace
 # Import built-in plugins for registration. External plugins can call
 # register_environment without modifying this package.
 from . import browsecomp_plus as browsecomp_plus
+from . import deepdive as deepdive
 from . import oolong as oolong
 from . import oolong_synth as oolong_synth
 from . import textcraft_synth as textcraft_synth
@@ -25,6 +26,7 @@ __all__ = [
     "run_environment",
     "run_registered_environment",
     "browsecomp_plus",
+    "deepdive",
     "oolong",
     "oolong_synth",
     "textcraft_synth",

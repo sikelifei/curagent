@@ -9,9 +9,10 @@ from ..base import AgentEnvironment
 from ..registry import register_environment
 from .dataset import BrowseCompQuery
 from .prompts import (
-    DEFAULT_BROWSECOMP_SYSTEM_PROMPT,
     DEFAULT_BROWSECOMP_AGENT_PROMPT,
     DEFAULT_BROWSECOMP_FORCED_FINAL_PROMPT,
+    DEFAULT_BROWSECOMP_ROOT_COMPLETION_PROMPT,
+    DEFAULT_BROWSECOMP_WORKER_COMPLETION_PROMPT,
     DEFAULT_BROWSECOMP_WORKER_FORCED_FINAL_PROMPT,
     DEFAULT_BROWSECOMP_TASK_TEMPLATE,
     build_browsecomp_task_prompt,
@@ -37,6 +38,7 @@ class BrowseCompPlusEnvironment(AgentEnvironment):
         bm25_url: str = "http://127.0.0.1:8080/mcp",
         max_search_calls: int = 20,
         bm25_timeout: float = 60.0,
+        snippet_max_chars: int = 1000,
         search_client: SearchClient | None = None,
         prompt_template: str = DEFAULT_BROWSECOMP_TASK_TEMPLATE,
         agent_prompt: str = DEFAULT_BROWSECOMP_AGENT_PROMPT,
@@ -45,6 +47,9 @@ class BrowseCompPlusEnvironment(AgentEnvironment):
             raise TypeError("sample must be a BrowseCompQuery")
         self.sample = sample
         self.bm25_url = str(bm25_url)
+        if snippet_max_chars <= 0:
+            raise ValueError("snippet_max_chars must be positive")
+        self.snippet_max_chars = int(snippet_max_chars)
         self.trace = BrowseCompTrace(max_search_calls)
         self._search_client = search_client or MCPBM25Client(
             self.bm25_url,
@@ -69,8 +74,12 @@ class BrowseCompPlusEnvironment(AgentEnvironment):
         return self._agent_prompt
 
     @property
-    def system_prompt(self) -> str:
-        return DEFAULT_BROWSECOMP_SYSTEM_PROMPT
+    def completion_prompt(self) -> str:
+        return DEFAULT_BROWSECOMP_ROOT_COMPLETION_PROMPT
+
+    @property
+    def delegated_completion_prompt(self) -> str:
+        return DEFAULT_BROWSECOMP_WORKER_COMPLETION_PROMPT
 
     @property
     def forced_final_prompt(self) -> str:
@@ -100,7 +109,10 @@ class BrowseCompPlusEnvironment(AgentEnvironment):
         compact = " ".join(query.split())
         call_id, started = self.trace.begin_search(compact)
         try:
-            results = normalize_search_results(self._search_client.search(compact))
+            results = normalize_search_results(
+                self._search_client.search(compact),
+                snippet_max_chars=self.snippet_max_chars,
+            )
         except Exception as exc:
             self.trace.finish_search(
                 call_id,
@@ -122,6 +134,7 @@ class BrowseCompPlusEnvironment(AgentEnvironment):
             "query": self.sample.query,
             "retriever": "BM25",
             "bm25_url": self.bm25_url,
+            "snippet_max_chars": self.snippet_max_chars,
             "tool_call_counts": {"search": snapshot["search_calls"]},
             **snapshot,
         }

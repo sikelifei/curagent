@@ -56,8 +56,14 @@ class MCPBM25Client:
         return normalize_search_results(_tool_result_payload(result))
 
 
-def normalize_search_results(value: Any) -> list[dict[str, Any]]:
+def normalize_search_results(
+    value: Any,
+    *,
+    snippet_max_chars: int | None = None,
+) -> list[dict[str, Any]]:
     """Normalize the official search payload to docid/score/snippet mappings."""
+    if snippet_max_chars is not None and snippet_max_chars <= 0:
+        raise ValueError("snippet_max_chars must be positive or None")
     if value is None:
         return []
     if isinstance(value, Mapping) and set(value) == {"result"}:
@@ -72,12 +78,14 @@ def normalize_search_results(value: Any) -> list[dict[str, Any]]:
         if item.get("docid") is None:
             raise ValueError(f"BM25 result {index} is missing docid")
         raw_score = item.get("score")
-        snippet = item.get("snippet", item.get("text", ""))
+        snippet = str(item.get("snippet", item.get("text", "")))
+        if snippet_max_chars is not None:
+            snippet = snippet[:snippet_max_chars]
         normalized.append(
             {
                 "docid": str(item["docid"]),
                 "score": float(raw_score) if raw_score is not None else None,
-                "snippet": str(snippet),
+                "snippet": snippet,
             }
         )
     return normalized
