@@ -224,49 +224,50 @@ class TextCraftSynthEnvironment(AgentEnvironment):
                 raise RuntimeError("TextCraft episode is already finished")
             recipes = self.sample.recipes.get(item, ())
             if not recipes:
-                raise ValueError(f"Item {item!r} has no crafting recipe")
+                raise ValueError(f"Item {item!r} has no crafting recipe.")
 
-            selected: TextCraftRecipe | None = None
-            for recipe in recipes:
-                if output_count % recipe.result_count:
-                    continue
-                executions = output_count // recipe.result_count
-                expected = {
-                    ingredient: count * executions
-                    for ingredient, count in recipe.ingredients.items()
-                }
-                if supplied == expected:
-                    selected = recipe
-                    break
-            if selected is None:
-                raise ValueError(
-                    f"Ingredients do not match a recipe for {item!r}; "
-                    "use get_info([item_name]) and provide exact scaled counts"
+            diagnostics: list[str] = []
+            multiple_recipes = len(recipes) > 1
+            for recipe_index, recipe in enumerate(recipes, start=1):
+                diagnostic = _recipe_diagnostic(
+                    item=item,
+                    output_count=output_count,
+                    supplied=supplied,
+                    recipe=recipe,
+                    inventory=self._inventory,
                 )
-            for ingredient, count in supplied.items():
-                if self._inventory.get(ingredient, 0) < count:
-                    raise ValueError(
-                        f"Insufficient {ingredient!r}: have "
-                        f"{self._inventory.get(ingredient, 0)}, need {count}"
-                    )
-            for ingredient, count in supplied.items():
-                remaining = self._inventory[ingredient] - count
-                if remaining:
-                    self._inventory[ingredient] = remaining
-                else:
-                    self._inventory.pop(ingredient, None)
-            self._inventory[item] = self._inventory.get(item, 0) + output_count
-            event = {
-                "item": item,
-                "output_count": output_count,
-                "ingredients": dict(supplied),
-                "inventory_after": dict(self._inventory),
-            }
-            self._craft_history.append(event)
-            return (
-                f"Crafted {output_count}x {item}. "
-                f"Inventory now has {self._inventory.get(item, 0)}x {item}."
-            )
+                if diagnostic is not None:
+                    if multiple_recipes:
+                        diagnostics.append(f"Recipe {recipe_index}: {diagnostic}")
+                    else:
+                        diagnostics.append(diagnostic)
+                    continue
+
+                for ingredient, count in supplied.items():
+                    remaining = self._inventory[ingredient] - count
+                    if remaining:
+                        self._inventory[ingredient] = remaining
+                    else:
+                        self._inventory.pop(ingredient, None)
+                self._inventory[item] = self._inventory.get(item, 0) + output_count
+                event = {
+                    "item": item,
+                    "output_count": output_count,
+                    "ingredients": dict(supplied),
+                    "inventory_after": dict(self._inventory),
+                }
+                self._craft_history.append(event)
+                return (
+                    f"Crafted {output_count}x {item}. "
+                    f"Inventory now has {self._inventory.get(item, 0)}x {item}."
+                )
+
+            if multiple_recipes:
+                raise ValueError(
+                    f"No recipe matched for {item!r}. "
+                    + " ".join(diagnostics)
+                )
+            raise ValueError(diagnostics[0])
 
     def finish(self, message: str) -> str:
         with self._lock:
@@ -386,6 +387,58 @@ class TextCraftSynthEnvironment(AgentEnvironment):
             return result
 
         return depth(item)
+
+
+def _recipe_diagnostic(
+    *,
+    item: str,
+    output_count: int,
+    supplied: Mapping[str, int],
+    recipe: TextCraftRecipe,
+    inventory: Mapping[str, int],
+) -> str | None:
+    """Return the first deterministic validation error for one recipe."""
+    if output_count % recipe.result_count:
+        return (
+            f"Invalid output count for {item!r}. "
+            f"Recipe result_count={recipe.result_count}, "
+            f"requested output_count={output_count}. "
+            f"Output count must be a multiple of {recipe.result_count}."
+        )
+
+    executions = output_count // recipe.result_count
+    expected = {
+        ingredient: count * executions
+        for ingredient, count in recipe.ingredients.items()
+    }
+    for ingredient, expected_count in expected.items():
+        provided_count = supplied.get(ingredient, 0)
+        if provided_count == 0:
+            return (
+                f"Missing ingredient {ingredient!r}. "
+                f"Expected {expected_count}, provided 0."
+            )
+        if provided_count != expected_count:
+            return (
+                f"Wrong amount for ingredient {ingredient!r}. "
+                f"Expected {expected_count}, provided {provided_count}."
+            )
+
+    for ingredient in supplied:
+        if ingredient not in expected:
+            return (
+                f"Unexpected ingredient {ingredient!r}. "
+                f"This recipe does not use {ingredient!r}."
+            )
+
+    for ingredient, required in expected.items():
+        available = inventory.get(ingredient, 0)
+        if available < required:
+            return (
+                f"Insufficient inventory for {ingredient!r}. "
+                f"Need {required}, have {available}."
+            )
+    return None
 
 
 def _parse_counts(value: Any, label: str) -> dict[str, int]:

@@ -20,28 +20,33 @@ CRAFTING STRATEGY:
 - Start by inspecting the needed item recipes and current inventory with
   `get_info(...)` and `view_inventory()`, then use `craft(...)` with exact
   scaled ingredient counts.
-- Recipes produce fixed quantities per execution. Craft outputs only in valid
-  multiples of `result_count`, and scale every ingredient by the number of
-  recipe executions.
+- Each recipe describes one execution and produces fixed quantities. For
+  example, if one execution is 2 ore -> 3 items, craft 3 with 2 ore or
+  craft 6 with 4 ore; scale every ingredient by the number of executions.
 - Treat each requested quantity as a minimum additional quantity. If it is not
   a multiple of `result_count`, craft the smallest valid multiple that satisfies
-  it; overproduction is correct.
+  it; valid fixed-output overproduction is correct.
 - Reuse existing intermediate items when possible and verify recipe and
   inventory information before claiming that an item is impossible to craft.
 - Normal craft mistakes are recoverable feedback. Read the returned error,
   correct the recipe, counts, or inventory assumptions, and continue.
+- Never invent or guess item names. Use only exact names in the assigned task,
+  current inventory, recipes, or item information returned by `get_info(...)`.
 
 DELEGATION STRATEGY:
 
-- Subagents are optional. Solve straightforward intermediate recipes directly
-  when convenient.
+- Subagents are optional. Solve simple leaf or straightforward recipes
+  directly when convenient. Do not delegate solely because a recipe is deep or
+  complex.
 - Delegate only a smaller, clearly bounded intermediate task that simplifies
   the current task. Never delegate an unchanged copy of the current task.
 - Put the complete assignment in the natural-language `task` string: the exact
-  local item or result and task scope, its required additional quantity,
-  whether prerequisites may be prepared, any restriction that is genuinely
-  needed, and when to return. Do not pass these as separate keyword arguments;
-  use `context` only for supporting data.
+  local item or result and task scope, the current shared-inventory count, the
+  minimum final count, whether prerequisites may be prepared, any restriction
+  that is genuinely needed, and when to return. Do not pass these as separate
+  keyword arguments; use `context` only for supporting data.
+- For delegated crafting, state the shared-inventory threshold explicitly and
+  say to return immediately once it is reached.
 - All agents operate on the shared live inventory for crafting. Changes made by
   a child are immediately visible to its parent and other agents.
 - Use `spawn_subagent(...)` for one task that should run sequentially. Use
@@ -54,10 +59,10 @@ One valid delegation example:
 <python>
 result = spawn_subagent(
     task=(
-        "Craft at least 3 additional m4_i1 using the shared inventory. "
-        "You may prepare any prerequisites required for m4_i1. "
-        "Do not craft the root final target. "
-        "Return immediately after the requested additional m4_i1 is available."
+        "The shared inventory currently contains 3x ITEM. "
+        "Make the shared inventory contain at least 7x ITEM. "
+        "You may prepare prerequisites. "
+        "Return immediately when the shared inventory contains at least 7x ITEM."
     )
 )
 </python>
@@ -77,8 +82,10 @@ DEFAULT_TEXTCRAFT_SUBAGENT_PROMPT = """### TextCraft-Synth
 
 You are a child agent. Solve only the complete delegated task in the initial
 user message using the shared inventory. The root benchmark task is not
-included. If an assigned item already exists, its requested quantity is
-additional to the existing amount.
+included. An explicit final shared-inventory threshold in the delegated task
+is the completion predicate: meet that final count and do not reinterpret it
+as an additional quantity. For generic assignments without such a threshold,
+follow the quantity semantics stated in the task.
 
 <TIPS>
 
@@ -86,26 +93,39 @@ CRAFTING STRATEGY:
 
 - Start with `get_info(...)` and `view_inventory()` for the assigned item, then
   use `craft(...)` with exact scaled ingredient counts.
-- Recipes produce fixed quantities per execution. Scale ingredients by recipe
-  executions and craft the smallest valid `result_count` multiple that meets
-  the required additional quantity; overproduction is correct.
+- Each recipe describes one execution and produces fixed quantities. For
+  example, if one execution is 2 ore -> 3 items, craft 3 with 2 ore or
+  craft 6 with 4 ore; scale every ingredient by the number of executions.
+- The requested quantity is a minimum increase. Craft the smallest valid
+  `result_count` multiple that meets it; valid fixed-output overproduction is
+  correct.
 - Treat normal craft mistakes as recoverable feedback: read the error, correct
   the action, and continue. Verify inventory and recipes before reporting a
   blocker.
+- Never invent or guess item names. Use only exact names in the assigned task,
+  current inventory, recipes, or item information returned by `get_info(...)`.
 
 DELEGATION STRATEGY:
 
-- Delegation is optional. Delegate only a smaller, clearly bounded intermediate
-  task when it simplifies the assigned work; solve simple recipes directly.
+- Delegation is optional. Solve simple leaf or straightforward recipes
+  directly. Delegate only a smaller, clearly bounded intermediate task when it
+  simplifies the assigned work. Do not delegate solely because a recipe is deep
+  or complex.
 - Never delegate an unchanged copy of the current task.
-- A delegated `task` must include the exact local item or result, required
-  additional quantity, whether prerequisites may be prepared, any genuinely
-  needed restriction, and the return condition. Keep this in its natural-
-  language task string; use `context` only for supporting data.
+- A delegated `task` must include the exact local item or result, and the
+  current shared-inventory count, minimum final count, whether prerequisites
+  may be prepared, any genuinely needed restriction, and the return condition.
+  State the shared-inventory threshold and return immediately once it is reached.
+  Keep this in its natural-language task string; use `context` only for
+  supporting data.
 - All agents operate on the shared live inventory for crafting, and child
   changes are visible immediately. Run dependent work sequentially; use
   concurrent delegation only for independent tasks without shared-resource
   conflicts. Re-observe after a child returns.
+
+Example threshold task: "The shared inventory currently contains 3x ITEM. Make
+the shared inventory contain at least 7x ITEM. You may prepare prerequisites.
+Return immediately when the shared inventory contains at least 7x ITEM."
 
 </TIPS>
 
@@ -134,20 +154,22 @@ DEFAULT_TEXTCRAFT_SUBAGENT_COMPLETION_PROMPT = """### Completion
 
 Child-only completion uses `return_to_parent(result=None)`.
 
-When your assigned task is complete, immediately call:
+When the assigned task is complete, return immediately. If the task states an
+inventory threshold, verify that the threshold has been reached before
+returning. Then call this one-positional-string status:
 
-return_to_parent("short result")
+return_to_parent("DONE: inventory now contains at least 7x ITEM.")
 
 A plain string does NOT return to the parent.
 
 Correct:
 <python>
-return_to_parent("Crafted the requested additional 3x m4_i1.")
+return_to_parent("DONE: inventory now contains at least 7x ITEM.")
 </python>
 
 Incorrect:
 <python>
-"Crafted the requested additional 3x m4_i1."
+"DONE: inventory now contains at least 7x ITEM."
 </python>
 
 Incorrect:
@@ -156,12 +178,10 @@ return_to_parent
 </python>
 
 If the assigned task genuinely cannot be completed, first verify the recipe
-and inventory, then return a concise reason such as:
+and inventory, then return a concise BLOCKED status such as:
 
 <python>
-return_to_parent(
-    "Unable to complete: missing ... after checking recipe and inventory."
-)
+return_to_parent("BLOCKED: verified missing ore after checking the recipe and inventory.")
 </python>
 """
 
@@ -185,7 +205,8 @@ DEFAULT_TEXTCRAFT_SUBAGENT_FORCED_FINAL_PROMPT = """No working steps remain.
 Return a concise plain-text report of the assigned crafting work. Do not use
 tools or claim completion of the overall root task. Report only verified work or
 a verified blocker. If the assigned work is complete, call
-`return_to_parent("short result")` in the next Python block.
+`return_to_parent("DONE: inventory now contains at least 7x ITEM.")` in the next
+Python block.
 """
 
 
@@ -223,13 +244,13 @@ model's perspective; call them directly.
 5. `spawn_subagent(task: str, context=None) -> str`
    Run one child agent. Put exact target items and quantities in `task`; pass
    the objective, quantity, scope, restrictions, and return condition through
-   that task string. Pass supporting data through `context` when needed. This
-   Call it directly; do not add `await` merely to make the recursion decision.
+   that task string. Pass supporting data through `context` when needed. Call
+   it directly; do not add `await` merely to make the recursion decision.
 
 6. `spawn_subagents(requests: list[dict]) -> list[str]`
    Run independent child requests concurrently. Each request contains `task`
-   and optional `context`. All agents share the live crafting inventory. This
-   Call it directly for independent branches; use sequential
+   and optional `context`. All agents share the live crafting inventory. Call
+   it directly for independent branches; use sequential
    `spawn_subagent(...)` calls when one branch depends on another.
 
 REPL variables persist for the current agent. Return exactly one executable

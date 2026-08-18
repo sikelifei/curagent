@@ -26,6 +26,7 @@ from recursive_agent.envs import run_registered_environment
 from recursive_agent.envs.textcraft_synth.prompts import (
     DEFAULT_TEXTCRAFT_AGENT_PROMPT,
 )
+from recursive_agent.envs.textcraft_synth.trace_analysis import analyze_textcraft_result
 from recursive_agent.repl import find_repl_blocks
 
 
@@ -48,6 +49,9 @@ EXPERIMENT_FILES = {
     "baseline_recursion": "experiment_4_baseline_recursion.jsonl",
     "prompt_variant": "experiment_5_prompt_variant.jsonl",
     "rl_sampling": "experiment_6_rl_sampling.jsonl",
+    "child_return_smoke": "smoke_child_return.jsonl",
+    "direct_smoke": "direct_smoke.jsonl",
+    "protocol_fixed_30": "curagent_fixed_30.jsonl",
 }
 
 FORCED_RECURSION_SUFFIX = """Validation requirement for this rollout:
@@ -453,10 +457,19 @@ def extract_rollout_metrics(
     missing = report_data.get("missing", {})
     if not isinstance(missing, Mapping):
         missing = {}
+    analysis_row = {
+        "ok": error is None,
+        "success": bool(report_data.get("success", False)),
+        "score": float(report_data.get("score", 0.0) or 0.0),
+        "trace": dict(trace or {}),
+    }
+    analyzed = analyze_textcraft_result(analysis_row)
     return {
         "task_id": task_id,
         "budget": budget,
         "success": bool(report_data.get("success", False)),
+        "score": float(report_data.get("score", 0.0) or 0.0),
+        "finished": bool(report_data.get("finished", False)),
         "termination_reason": str(status),
         "global_steps_used": int(global_steps),
         "number_of_agents": len(agents),
@@ -472,6 +485,38 @@ def extract_rollout_metrics(
         "parse_errors": int(parse_errors),
         "runtime_errors": int(runtime_errors),
         "missing": dict(missing),
+        "steps": int(global_steps),
+        "root_steps": analyzed["root_steps"],
+        "child_steps": analyzed["child_steps"],
+        "recursive_children": analyzed["child_agent_count"],
+        "max_trace_depth": analyzed["max_trace_depth"],
+        "spawn_subagent_calls": analyzed["spawn_subagent_calls"],
+        "spawn_subagents_calls": analyzed["spawn_subagents_calls"],
+        "children_completed": analyzed["children_completed"],
+        "children_budget_exhausted": analyzed["children_budget_exhausted"],
+        "children_failed": analyzed["children_failed"],
+        "return_to_parent_calls": analyzed["return_to_parent_calls"],
+        "finish_attempts": analyzed["finish_attempts"],
+        "get_info_calls": analyzed["get_info_calls"],
+        "noarg_get_info_calls": analyzed["get_info_no_arg_calls"],
+        "craft_calls": analyzed["actual_craft_calls"],
+        "craft_errors": analyzed["tool_errors"],
+        "craft_attempts": analyzed["craft_attempts"],
+        "craft_successes": analyzed["craft_successes"],
+        "craft_error_wrong_amount": analyzed["craft_error_wrong_amount"],
+        "craft_error_missing_ingredient": analyzed["craft_error_missing_ingredient"],
+        "craft_error_extra_ingredient": analyzed["craft_error_extra_ingredient"],
+        "craft_error_invalid_output_multiple": analyzed["craft_error_invalid_output_multiple"],
+        "craft_error_insufficient_inventory": analyzed["craft_error_insufficient_inventory"],
+        "invented_or_unknown_item_attempts": analyzed["invented_or_unknown_item_attempts"],
+        "same_task_child_edges": analyzed["same_task_child_edges"],
+        "no_progress_repetitions": analyzed["no_progress_repetitions"],
+        "repeated_action_count": analyzed["repeated_action_count"],
+        "repeated_observation_count": analyzed["repeated_observation_count"],
+        "no_progress_streak": analyzed["no_progress_streak"],
+        "no_progress_warnings": analyzed["no_progress_warnings"],
+        "no_progress_terminations": analyzed["no_progress_terminations"],
+        "final_missing_targets": analyzed["final_missing_targets"],
     }
 
 

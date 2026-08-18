@@ -378,7 +378,10 @@ class HarnessCoreTests(unittest.TestCase):
         self.assertEqual(scheduler.budget.consumed_steps, 2)
         self.assertEqual(len(client.calls), 2)
         self.assertEqual(result.steps, 2)
-        self.assertEqual(result.answer, "finalized:['A', '']")
+        self.assertEqual(
+            result.answer,
+            "finalized:['A', 'CHILD_BUDGET_EXHAUSTED: delegated task was not confirmed complete.']",
+        )
         self.assertEqual(result.status, "completed")
 
     def test_top_level_await_sequential_and_ordered_batch(self) -> None:
@@ -457,10 +460,55 @@ class HarnessCoreTests(unittest.TestCase):
         client = _Client(handler)
         scheduler = RecursiveScheduler(_Environment(), client, max_total_steps=2, max_depth=1)
         result = scheduler.run("root")
-        self.assertEqual(result.answer, "finalized:Error: subagent model call failed")
+        self.assertEqual(result.answer, "finalized:CHILD_FAILED: delegated task model call failed.")
         self.assertEqual(scheduler.budget.consumed_steps, 1)
         self.assertEqual(scheduler.budget.reserved_steps, 0)
         self.assertEqual(result.usage.total_calls, 1)
+
+    def test_child_budget_exhaustion_is_distinct_and_never_returns_raw_final(self) -> None:
+        def handler(messages: list[dict[str, Any]]) -> Any:
+            if _task(messages) == "child":
+                return _python("print('forced-final-looking content')")
+            return _python("child_result = spawn_subagent('child')\nfinish(child_result)")
+
+        client = _Client(handler)
+        scheduler = RecursiveScheduler(_Environment(), client, max_total_steps=2, max_depth=1)
+        result = scheduler.run("root")
+
+        self.assertEqual(
+            result.answer,
+            "finalized:CHILD_BUDGET_EXHAUSTED: delegated task was not confirmed complete.",
+        )
+        self.assertEqual(len(client.calls), 2)
+        assert scheduler.root is not None
+        self.assertEqual(scheduler.root.children[0].trace.status, "budget_exhausted")
+        self.assertNotIn("forced-final-looking content", result.answer)
+
+    def test_child_no_progress_warns_then_terminates_without_affecting_root(self) -> None:
+        class _StableEnvironment(_Environment):
+            def observe(self) -> str:
+                return "stable observation"
+
+        def handler(messages: list[dict[str, Any]]) -> Any:
+            if _task(messages) == "child":
+                return _python("print('same action')")
+            return _python("child_result = spawn_subagent('child')\nfinish(child_result)")
+
+        client = _Client(handler)
+        scheduler = RecursiveScheduler(_StableEnvironment(), client, max_total_steps=8, max_depth=1)
+        result = scheduler.run("root")
+
+        self.assertEqual(
+            result.answer,
+            "finalized:CHILD_NO_PROGRESS: repeated actions made no inventory progress.",
+        )
+        assert scheduler.root is not None
+        child = scheduler.root.children[0]
+        self.assertEqual(child.trace.status, "completed")
+        self.assertTrue(child.trace.no_progress_termination)
+        self.assertGreaterEqual(child.trace.no_progress_warning_count, 1)
+        self.assertGreaterEqual(child.trace.repeated_action_count, 5)
+        self.assertFalse(scheduler.root.trace.no_progress_termination)
 
     def test_failed_root_model_call_releases_budget(self) -> None:
         client = _Client(lambda messages: RuntimeError("failure"))

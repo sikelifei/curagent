@@ -418,6 +418,10 @@ def _agent_trace_to_dict(trace: Any) -> dict[str, Any] | None:
         "answer": trace.answer,
         "error": trace.error,
         "duration_seconds": trace.duration_seconds,
+        "no_progress_warning_count": trace.no_progress_warning_count,
+        "no_progress_termination": trace.no_progress_termination,
+        "repeated_action_count": trace.repeated_action_count,
+        "repeated_observation_count": trace.repeated_observation_count,
     }
 
 

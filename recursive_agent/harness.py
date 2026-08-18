@@ -7,6 +7,7 @@ choose the wording and context of delegated work.
 
 from __future__ import annotations
 
+from collections import deque
 import asyncio
 import copy
 import inspect
@@ -34,6 +35,8 @@ from .types import (
 )
 
 _UNSET: Final = object()
+_NO_PROGRESS_WARNING_AFTER = 3
+_NO_PROGRESS_TERMINATE_AFTER = 5
 
 MINIMAL_CODEACT_SYSTEM_PROMPT = """You are a generic CodeAct agent.
 Use the current task, context, observation, and action space to make progress.
@@ -757,13 +760,17 @@ class RecursiveScheduler:
             with self._trace_lock:
                 self.nodes.append(child)
             result = child.run()
+            if result.status == "budget_exhausted":
+                return "CHILD_BUDGET_EXHAUSTED: delegated task was not confirmed complete."
+            if result.status not in {"completed", "environment_done"}:
+                return f"CHILD_FAILED: delegated task ended with status {result.status}."
             return result.answer
         except (CancellationError, TimeoutExceededError):
             raise
         except ModelCallError:
-            return "Error: subagent model call failed"
+            return "CHILD_FAILED: delegated task model call failed."
         except Exception:
-            return "Error: subagent failed"
+            return "CHILD_FAILED: delegated task failed."
 
     def _spawn_one(self, parent: "AgentNode", task: str, context: Any) -> str:
         self._validate_task(task)
@@ -863,6 +870,12 @@ class AgentNode:
         self._spawn_lock = threading.Lock()
         self._direct_spawned = 0
         self._last_response: str | None = None
+        self._no_progress_signatures: deque[tuple[str, str, str]] = deque(maxlen=4)
+        self._no_progress_streak = 0
+        self._no_progress_warning_count = 0
+        self._no_progress_termination = False
+        self._repeated_action_count = 0
+        self._repeated_observation_count = 0
         self._system_prompt = scheduler._system_prompt(is_root=self.is_root)
         self.trace.system_prompt = self._system_prompt
         self.capabilities = scheduler._capabilities_for(self)
@@ -930,6 +943,10 @@ class AgentNode:
         self.trace.answer = answer_text
         self.trace.usage = self._local_usage.snapshot()
         self.trace.duration_seconds = time.perf_counter() - started
+        self.trace.no_progress_warning_count = self._no_progress_warning_count
+        self.trace.no_progress_termination = self._no_progress_termination
+        self.trace.repeated_action_count = self._repeated_action_count
+        self.trace.repeated_observation_count = self._repeated_observation_count
         return AgentResult(
             answer=answer_text,
             status=status,  # type: ignore[arg-type]
@@ -1052,6 +1069,21 @@ class AgentNode:
                     self._execution_feedback(outputs, errors),
                     self.scheduler.max_observation_chars,
                 )
+                if terminated is None:
+                    no_progress_feedback, no_progress_termination = self._observe_no_progress(
+                        observation=observation,
+                        code="\n".join(
+                            execution.code for execution in step.code_executions
+                        ),
+                        execution_output=execution_output,
+                    )
+                    if no_progress_feedback:
+                        execution_output = f"{execution_output}\n\n{no_progress_feedback}"
+                    if no_progress_termination:
+                        terminated = NodeTermination(
+                            "no_progress",
+                            "CHILD_NO_PROGRESS: repeated actions made no inventory progress.",
+                        )
                 step.model_observation = execution_output
                 step.observation_truncated = (
                     step.observation_truncated or execution_truncated
@@ -1072,6 +1104,51 @@ class AgentNode:
         except BaseException as exc:
             self._record_failure(exc, started)
             raise
+
+    def _observe_no_progress(
+        self,
+        *,
+        observation: str,
+        code: str,
+        execution_output: str,
+    ) -> tuple[str | None, bool]:
+        """Track conservative child-local repetition without choosing actions."""
+        if self.is_root or not code.strip():
+            return None, False
+        normalized_action = " ".join(code.split())
+        normalized_observation = " ".join(observation.split())
+        normalized_output = " ".join(execution_output.split())
+        signature = (normalized_action, normalized_output, normalized_observation)
+        if self._no_progress_signatures:
+            previous = self._no_progress_signatures[-1]
+            if signature[0] == previous[0]:
+                self._repeated_action_count += 1
+            if signature[2] == previous[2]:
+                self._repeated_observation_count += 1
+        self._no_progress_signatures.append(signature)
+        repeated = len(self._no_progress_signatures) >= 2 and all(
+            value == self._no_progress_signatures[-1]
+            for value in list(self._no_progress_signatures)[-2:]
+        )
+        cycle_repeated = len(self._no_progress_signatures) == 4 and (
+            self._no_progress_signatures[0] == self._no_progress_signatures[2]
+            and self._no_progress_signatures[1] == self._no_progress_signatures[3]
+        )
+        if repeated or cycle_repeated:
+            self._no_progress_streak += 1
+        else:
+            self._no_progress_streak = 0
+        if self._no_progress_streak >= _NO_PROGRESS_TERMINATE_AFTER:
+            self._no_progress_termination = True
+            return None, True
+        if self._no_progress_streak >= _NO_PROGRESS_WARNING_AFTER:
+            self._no_progress_warning_count += 1
+            return (
+                "Warning: repeated actions are not changing the inventory. "
+                "Re-read the recipe and change the action or return to the parent.",
+                False,
+            )
+        return None, False
 
     @staticmethod
     def _execution_feedback(outputs: list[str], errors: list[str]) -> str:

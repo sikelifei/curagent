@@ -105,6 +105,91 @@ class TextCraftSynthEnvironmentTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "already finished"):
             environment.craft({"ore": 2}, ("ingot", 2))
 
+    def test_craft_returns_precise_recoverable_diagnostics_without_mutation(self) -> None:
+        cases = (
+            (
+                lambda environment: environment.craft({"ore": 2}, ("unknown", 1)),
+                ("no crafting recipe", "unknown"),
+            ),
+            (
+                lambda environment: environment.craft({"ore": 2}, ("ingot", 3)),
+                ("Invalid output count", "result_count=2", "output_count=3", "multiple of 2"),
+            ),
+            (
+                lambda environment: environment.craft({"ingot": 1}, ("tool", 1)),
+                ("Missing ingredient", "wood", "Expected 1", "provided 0"),
+            ),
+            (
+                lambda environment: environment.craft({"ore": 6}, ("ingot", 2)),
+                ("Wrong amount", "ore", "Expected 2", "provided 6"),
+            ),
+            (
+                lambda environment: environment.craft(
+                    {"ore": 2, "foo": 1}, ("ingot", 2)
+                ),
+                ("Unexpected ingredient", "foo", "does not use", "foo"),
+            ),
+            (
+                lambda environment: environment.craft({"ore": 4}, ("ingot", 4)),
+                ("Insufficient inventory", "ore", "Need 4", "have 2"),
+            ),
+        )
+
+        for invoke, expected_fragments in cases:
+            with self.subTest(expected=expected_fragments):
+                environment = TextCraftSynthEnvironment(samples=[sample_row()])
+                before = environment.view_inventory()
+                result = invoke(environment)
+                self.assertTrue(result.startswith("Error:"))
+                for fragment in expected_fragments:
+                    self.assertIn(fragment, result)
+                self.assertEqual(environment.view_inventory(), before)
+                self.assertEqual(environment.report()["craft_calls"], 0)
+
+    def test_craft_scales_one_recipe_execution_and_rejects_unscaled_input(self) -> None:
+        row = sample_row()
+        row["recipes"]["ingot"]["result_count"] = 3
+        row["initial_inventory"] = {"ore": 6}
+        environment = TextCraftSynthEnvironment(samples=[row])
+
+        self.assertIn("Crafted 3x ingot", environment.craft({"ore": 2}, ("ingot", 3)))
+        self.assertIn("Crafted 6x ingot", environment.craft({"ore": 4}, ("ingot", 6)))
+        before = environment.view_inventory()
+        result = environment.craft({"ore": 6}, ("ingot", 3))
+
+        self.assertIn("Wrong amount", result)
+        self.assertIn("Expected 2", result)
+        self.assertIn("provided 6", result)
+        self.assertEqual(environment.view_inventory(), before)
+        self.assertEqual(environment.report()["craft_calls"], 2)
+        self.assertEqual(environment.view_inventory().get("ingot"), 9)
+
+    def test_multiple_recipe_diagnostics_are_source_ordered_and_labeled(self) -> None:
+        row = sample_row()
+        row["initial_inventory"] = {"ore": 2, "wood": 1}
+        row["recipes"]["ingot"] = [
+            {"ingredients": {"ore": 2}, "result_count": 2},
+            {"ingredients": {"wood": 1}, "result_count": 1},
+        ]
+        environment = TextCraftSynthEnvironment(samples=[row])
+        before = environment.view_inventory()
+
+        result = environment.craft({"ore": 1}, ("ingot", 2))
+
+        self.assertIn("Recipe 1:", result)
+        self.assertIn("Wrong amount for ingredient 'ore'", result)
+        self.assertIn("Expected 2, provided 1", result)
+        self.assertIn("Recipe 2:", result)
+        self.assertIn("Missing ingredient 'wood'", result)
+        self.assertIn("Expected 2, provided 0", result)
+        self.assertLess(result.index("Recipe 1:"), result.index("Recipe 2:"))
+        self.assertEqual(environment.view_inventory(), before)
+        self.assertEqual(environment.report()["craft_calls"], 0)
+
+        self.assertIn("Crafted 1x ingot", environment.craft({"wood": 1}, ("ingot", 1)))
+        self.assertEqual(environment.view_inventory().get("ingot"), 1)
+        self.assertNotIn("wood", environment.view_inventory())
+
     def test_finish_requires_complete_inventory_and_score_is_partial(self) -> None:
         environment = TextCraftSynthEnvironment(samples=[sample_row()])
         finished = environment.finish("stopping")
@@ -274,18 +359,28 @@ class TextCraftSynthEnvironmentTests(unittest.TestCase):
             "get_info(...)",
             "view_inventory()",
             "CRAFTING STRATEGY:",
-            "Recipes produce fixed quantities per execution",
+            "Each recipe describes one execution",
+            "2 ore -> 3 items",
+            "craft 3 with 2 ore",
+            "craft 6 with 4 ore",
             "result_count",
             "smallest valid multiple that satisfies",
-            "overproduction is correct",
+            "valid fixed-output overproduction is correct",
             "recoverable feedback",
             "verify recipe and",
+            "Never invent or guess item names",
+            "exact names in the assigned task",
             "DELEGATION STRATEGY:",
             "Subagents are optional",
+            "simple leaf or straightforward recipes",
+            "Do not delegate solely because a recipe is deep",
             "clearly bounded intermediate task",
             "unchanged copy of the current task",
             "complete assignment",
-            "required additional quantity",
+            "current shared-inventory count",
+            "minimum final count",
+            "shared-inventory threshold",
+            "return immediately once it is reached",
             "natural-language `task` string",
             "shared live inventory",
             "immediately visible",
@@ -294,7 +389,9 @@ class TextCraftSynthEnvironmentTests(unittest.TestCase):
             "After any child returns",
             "One valid delegation example:",
             "result = spawn_subagent(",
-            "Craft at least 3 additional m4_i1",
+            "currently contains 3x ITEM",
+            "at least 7x ITEM",
+            "Return immediately when the shared inventory contains at least 7x ITEM.",
         ):
             self.assertIn(phrase, prompt)
 
@@ -309,22 +406,82 @@ class TextCraftSynthEnvironmentTests(unittest.TestCase):
         self.assertNotIn("<thought>", prompt)
 
         child_prompt = DEFAULT_TEXTCRAFT_CHILD_PROMPT
-        self.assertIn("CRAFTING STRATEGY:", child_prompt)
-        self.assertIn("DELEGATION STRATEGY:", child_prompt)
+        for phrase in (
+            "CRAFTING STRATEGY:",
+            "Each recipe describes one execution",
+            "2 ore -> 3 items",
+            "craft 3 with 2 ore",
+            "craft 6 with 4 ore",
+            "valid fixed-output overproduction is",
+            "Never invent or guess item names",
+            "exact names in the assigned task",
+            "DELEGATION STRATEGY:",
+            "Delegation is optional",
+            "simple leaf or straightforward recipes",
+            "Do not delegate solely because a recipe is deep",
+            "current shared-inventory count",
+            "minimum final count",
+            "shared-inventory threshold",
+            "return immediately once it is reached",
+            "currently contains 3x ITEM",
+            "at least 7x ITEM",
+            "Return immediately when the shared inventory contains at least 7x ITEM.",
+            "Call recursive tools directly; do not add `await`",
+        ):
+            self.assertIn(phrase, child_prompt)
         self.assertIn("spawn_subagent(task: str, context=None)", child_prompt)
         self.assertIn("spawn_subagents(requests: list[dict])", child_prompt)
-        self.assertIn("return_to_parent(result=None)", child_prompt)
-        self.assertIn('return_to_parent("short result")', child_prompt)
-        self.assertIn("A plain string does NOT return to the parent.", child_prompt)
         self.assertIn(
-            'return_to_parent("Crafted the requested additional 3x m4_i1.")',
+            "An explicit final shared-inventory threshold in the delegated task",
             child_prompt,
         )
-        self.assertIn('"Crafted the requested additional 3x m4_i1."', child_prompt)
+        self.assertIn(
+            "do not reinterpret it",
+            child_prompt,
+        )
+        self.assertIn(
+            "as an additional quantity",
+            child_prompt,
+        )
+        self.assertIn(
+            "For generic assignments without such a threshold,",
+            child_prompt,
+        )
+        self.assertNotIn(
+            "If an assigned item already exists, its requested quantity is additional",
+            child_prompt,
+        )
+        self.assertIn("return_to_parent(result=None)", child_prompt)
+        self.assertIn("When the assigned task is complete, return immediately.", child_prompt)
+        self.assertIn(
+            "If the task states an",
+            child_prompt,
+        )
+        self.assertIn(
+            "inventory threshold, verify that the threshold has been reached before",
+            child_prompt,
+        )
+        self.assertIn(
+            "returning. Then call this one-positional-string status:",
+            child_prompt,
+        )
+        self.assertNotIn("When the assigned inventory threshold is reached", child_prompt)
+        self.assertIn(
+            'return_to_parent("DONE: inventory now contains at least 7x ITEM.")',
+            child_prompt,
+        )
+        self.assertIn("BLOCKED: verified", child_prompt)
+        self.assertIn("A plain string does NOT return to the parent.", child_prompt)
+        self.assertNotIn('return_to_parent("short result")', child_prompt)
         self.assertIn("return_to_parent\n", child_prompt)
         self.assertNotIn("<thought>", child_prompt)
         self.assertNotIn("finish", child_prompt)
         self.assertNotIn('answer["ready"]', child_prompt)
+        self.assertIn("spawn_subagent(task: str, context=None)", DEFAULT_TEXTCRAFT_ROOT_PROMPT)
+        self.assertIn(
+            "do not add `await` merely to make the recursion decision.",
+            DEFAULT_TEXTCRAFT_ROOT_PROMPT,
+        )
         self.assertIn("`finish(message: str) -> str`", DEFAULT_TEXTCRAFT_ROOT_PROMPT)
         self.assertNotIn("return_to_parent", DEFAULT_TEXTCRAFT_ROOT_PROMPT)
 

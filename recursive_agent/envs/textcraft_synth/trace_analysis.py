@@ -28,6 +28,19 @@ def analyze_textcraft_result(row: dict[str, Any]) -> dict[str, Any]:
     repeated_action_count = 0
     repeated_observation_count = 0
     no_progress_streak = 0
+    no_progress_warnings = sum(
+        int(agent.get("no_progress_warning_count", 0) or 0) for agent in agents
+    )
+    no_progress_terminations = sum(
+        bool(agent.get("no_progress_termination", False)) for agent in agents
+    )
+    tool_errors = [str(value) for value in report.get("tool_errors") or []]
+    craft_error_wrong_amount = sum("Wrong amount for ingredient" in value for value in tool_errors)
+    craft_error_missing_ingredient = sum("Missing ingredient" in value for value in tool_errors)
+    craft_error_extra_ingredient = sum("Unexpected ingredient" in value for value in tool_errors)
+    craft_error_invalid_output_multiple = sum("Invalid output count" in value for value in tool_errors)
+    craft_error_insufficient_inventory = sum("Insufficient inventory" in value for value in tool_errors)
+    invented_or_unknown_item_attempts = sum("has no crafting recipe" in value for value in tool_errors)
 
     for index, agent in enumerate(agents):
         per_agent_queries: Counter[str] = Counter()
@@ -151,12 +164,25 @@ def analyze_textcraft_result(row: dict[str, Any]) -> dict[str, Any]:
         "multi_craft_executions": multi_craft_executions,
         "actual_craft_calls": int(row.get("craft_calls", report.get("craft_calls", 0)) or 0),
         "tool_errors": len(report.get("tool_errors") or []),
+        "craft_attempts": int(report.get("craft_calls", 0) or 0),
+        "craft_successes": max(
+            0,
+            int(report.get("craft_calls", 0) or 0) - len(tool_errors),
+        ),
+        "craft_error_wrong_amount": craft_error_wrong_amount,
+        "craft_error_missing_ingredient": craft_error_missing_ingredient,
+        "craft_error_extra_ingredient": craft_error_extra_ingredient,
+        "craft_error_invalid_output_multiple": craft_error_invalid_output_multiple,
+        "craft_error_insufficient_inventory": craft_error_insufficient_inventory,
+        "invented_or_unknown_item_attempts": invented_or_unknown_item_attempts,
         "execution_errors": execution_errors,
         "observation_truncations": observation_truncations,
         "repeated_action_count": repeated_action_count,
         "repeated_observation_count": repeated_observation_count,
         "no_progress_streak": no_progress_streak,
         "no_progress_repetitions": repeated_action_count + repeated_observation_count,
+        "no_progress_warnings": no_progress_warnings,
+        "no_progress_terminations": no_progress_terminations,
         "termination_reason": (root or {}).get("status"),
         "finish_attempts": int(report.get("finish_attempts", 0) or 0),
         "final_missing_targets": report.get("missing") or {},
@@ -213,6 +239,10 @@ def aggregate_textcraft_results(metrics: Iterable[dict[str, Any]]) -> dict[str, 
         ),
         "get_info_no_arg_calls": sum(row["get_info_no_arg_calls"] for row in traced),
         "multi_craft_executions": sum(row["multi_craft_executions"] for row in traced),
+        "no_progress_warnings": sum(row["no_progress_warnings"] for row in traced),
+        "no_progress_terminations": sum(
+            row["no_progress_terminations"] for row in traced
+        ),
         "observation_truncations": sum(row["observation_truncations"] for row in traced),
         "recursion_issue_counts": dict(sorted(recursion_issue_counts.items())),
         "trajectory_issue_counts": dict(sorted(trajectory_issue_counts.items())),

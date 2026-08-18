@@ -129,6 +129,10 @@ class AgentTrace:
     answer: str | None = None
     error: str | None = None
     duration_seconds: float = 0.0
+    no_progress_warning_count: int = 0
+    no_progress_termination: bool = False
+    repeated_action_count: int = 0
+    repeated_observation_count: int = 0
 
 
 @dataclass
