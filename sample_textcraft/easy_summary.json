@@ -1,0 +1,35 @@
+{
+  "environment": "textcraft_synth",
+  "model": "deepseek-v4-flash (from config)",
+  "requested_rows": 1,
+  "recorded_rows": 1,
+  "successful_runs": 1,
+  "task_successes": 1,
+  "score": 1.0,
+  "score_percent": 100.0,
+  "by_difficulty": {
+    "easy": {
+      "n": 1,
+      "score": 1.0
+    }
+  },
+  "rows": [
+    {
+      "instance_id": 0,
+      "ok": true,
+      "duration_seconds": 10.981911920011044,
+      "id": "generated-easy-101-0",
+      "difficulty": "easy",
+      "crafting_depth": 2,
+      "success": true,
+      "score": 1.0,
+      "finished": true,
+      "craft_calls": 8,
+      "missing": {},
+      "agent_status": "environment_done",
+      "steps": 5,
+      "recursive_children": 0,
+      "max_trace_depth": 0
+    }
+  ]
+}

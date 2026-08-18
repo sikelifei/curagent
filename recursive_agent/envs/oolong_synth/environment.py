@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from ...tools import CapabilityCollection
 from ...types import EnvironmentStatus
 from ..base import AgentEnvironment
 from ..registry import register_environment
@@ -17,6 +18,7 @@ from .dataset import (
 )
 from .prompts import (
     DEFAULT_SYNTH_AGENT_PROMPT,
+    DEFAULT_OOLONG_SYNTH_CODEACT_SYSTEM_PROMPT,
     DEFAULT_SYNTH_CHILD_PROMPT,
     DEFAULT_SYNTH_FORCED_FINAL_PROMPT,
     DEFAULT_SYNTH_SUBAGENT_FORCED_FINAL_PROMPT,
@@ -28,7 +30,7 @@ from .prompts import (
     build_synth_task_prompt,
 )
 from .scoring import evaluate_synth_response
-from .tools import build_synth_tools
+from .tools import build_synth_capabilities, build_synth_tools
 
 
 @register_environment("oolong_synth")
@@ -68,6 +70,7 @@ class OolongSynthEnvironment(AgentEnvironment):
         self._submitted_answer: str | None = None
         self._closed = False
         self._tools = build_synth_tools(self)
+        self._codeact_capabilities = build_synth_capabilities()
         dataset_intro = "\n".join(
             line
             for line in self.sample.context_window_text.splitlines()
@@ -99,6 +102,15 @@ class OolongSynthEnvironment(AgentEnvironment):
     @property
     def agent_prompt(self) -> str:
         return self._agent_prompt
+
+    @property
+    def use_recursive_codeact_harness(self) -> bool:
+        return True
+
+    @property
+    def environment_system_prompt(self) -> str:
+        """Return static Oolong guidance shared by every scheduler node."""
+        return DEFAULT_OOLONG_SYNTH_CODEACT_SYSTEM_PROMPT
 
     @property
     def root_prompt(self) -> str:
@@ -143,6 +155,46 @@ class OolongSynthEnvironment(AgentEnvironment):
     def tools(self) -> dict[str, Any]:
         return dict(self._tools)
 
+    def codeact_capabilities(
+        self,
+        is_root: bool,
+        depth: int,
+    ) -> CapabilityCollection:
+        if not isinstance(is_root, bool):
+            raise TypeError("is_root must be a bool")
+        if not isinstance(depth, int) or isinstance(depth, bool) or depth < 0:
+            raise ValueError("depth must be a non-negative integer")
+        return self._codeact_capabilities
+
+    def observe(self) -> dict[str, Any]:
+        """Return shared episode metadata without exposing assigned source data."""
+        submitted = self._submitted_answer
+        evaluation = (
+            evaluate_synth_response(
+                self.sample.answer,
+                submitted,
+                self.sample.answer_type,
+            )
+            if submitted is not None
+            else None
+        )
+        return {
+            "environment": self.name,
+            "dataset": self.sample.dataset,
+            "dataset_name": self.dataset.dataset_name,
+            "split": self.dataset.split,
+            "instance_id": self.sample.source_index,
+            "id": self.sample.sample_id,
+            "context_window_id": self.sample.context_window_id,
+            "context_len": self.sample.context_len,
+            "answer_type": self.sample.answer_type,
+            "task_group": self.sample.task_group,
+            "submitted": submitted is not None,
+            "submitted_answer": submitted,
+            "score": evaluation.score if evaluation is not None else 0.0,
+            "done": submitted is not None,
+        }
+
     def submit_answer(self, answer: str) -> dict[str, Any]:
         if self._submitted_answer is not None:
             raise RuntimeError("Oolong-Synth answer has already been submitted")
@@ -150,6 +202,14 @@ class OolongSynthEnvironment(AgentEnvironment):
             raise ValueError("Oolong-Synth answer must be a non-empty string")
         self._submitted_answer = answer.strip()
         return self.report()
+
+    def finalize_root(self, result: Any = None) -> str:
+        """Submit one normalized root answer through the existing scorer."""
+        if not isinstance(result, str) or not result.strip():
+            raise ValueError("Oolong-Synth root finish result must be a non-empty string")
+        normalized = result.strip()
+        self.submit_answer(normalized)
+        return normalized
 
     def status(self) -> EnvironmentStatus:
         if self._submitted_answer is None:

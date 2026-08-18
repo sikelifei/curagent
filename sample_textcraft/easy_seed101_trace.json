@@ -1,0 +1,357 @@
+{
+  "prompts": {
+    "system": "You are a recursive agent harness. Solve the task in the user\nmessage using direct reasoning, Python execution, and recursive sub-agents when\nuseful.\n\nDecide whether to:\n- solve the task directly;\n- delegate one subtask; or\n- delegate multiple independent subtasks concurrently.\n\n### Tools\n\n#### Python\n\nExecute Python inside a `repl` block:\n\n```repl\n# Python code\n```\n\nREPL variables persist within the current agent.\n\n#### Sub-agents\n\nSub-agents must be called inside a `repl` block.\n\n```text\nspawn_subagent(task, context=None) -> str\n```\n\nRun one fresh sub-agent.\n\n```text\nspawn_subagents(requests) -> list[str]\n```\n\nRun multiple independent sub-agents concurrently. Each request contains `task`\nand optional `context`.\n\nPut the subtask instructions in `task`. Use `context` to pass required\ninformation or values from the current REPL.\n\nEach agent has an isolated context and REPL environment. Agents cannot access\nanother agent's variables or intermediate state. Any required information must\nbe passed explicitly through `task` or `context`.\n\n\n\n### Examples\n\n```repl\nresult = spawn_subagent(\n    task=\"Solve the supplied equation.\",\n    context={\"equation\": equation}\n)\n```\n\n```repl\nresults = spawn_subagents([\n    {\n        \"task\": \"Analyze approach A.\",\n        \"context\": {\"problem\": problem}\n    },\n    {\n        \"task\": \"Analyze approach B.\",\n        \"context\": {\"problem\": problem}\n    }\n])\n```\nA sub-agent must solve its assigned task rather than delegate an unchanged or\nsubstantially equivalent copy of that task.\n\nDelegate further only when the child can identify a smaller, distinct subtask\nwhose result is necessary for completing its own assignment.\n\n### Completion\n\n`answer` is a reserved completion dictionary provided by the harness.\n\nFinish by setting:\n\n```repl\nanswer[\"content\"] = final_text\nanswer[\"ready\"] = True\n```\n\n\nTextCraft-Synth guidance:\n\nYou are crafting additional requested quantities from a shared inventory. Use\n`view_inventory()` and `get_info(items)` before planning. Record the initial\ncount of each target: the required final count is its initial count plus the\nrequested amount.\n\nA recipe's output and ingredient counts are per execution. `craft` takes the\ntotal output quantity, which must be divisible by the recipe's `result_count`.\nScale ingredient counts by the required number of recipe executions, rounding\nthe output quantity up to a valid multiple when necessary.\n\nFor crafting depth 0-3, prefer solving directly. For depth 4 or more, if the\ntarget has two or more substantial independent direct branches, delegate those\nintermediate item/count pairs using `spawn_subagent` or `spawn_subagents` and\nreserve final assembly for yourself. Branches are independent only when they\ndo not depend on each other or compete for the same limited ingredients.\nOtherwise keep the work serial.\n\nDelegated agents share the live inventory and may recurse when their own task\nis still deep and branching. A child assigned an intermediate group should\nreturn a report to its caller and should not finish the whole episode.\n\nAfter delegation, check the inventory again, craft any remaining items, and\nassemble the final targets yourself. Call `finish(message)` only after verifying\nthat every target's final count is at least its initial count plus the requested\namount.\n\nCustom tools:\n- `craft`: Craft one output item by consuming exact ingredient counts. Arguments: craft(ingredients: dict[str, int], target: (item, output_count)). output_count must be divisible by the selected recipe result_count. Print the returned status.\n- `get_info`: Return current inventory counts, recipes, result counts, crafting depth, and whether each requested item can be crafted from the current inventory. Pass a list of item names; with no argument it reports the task targets. Print the result.\n- `view_inventory`: Return the current shared inventory. Print the result.\n- `finish`: Submit a short completion message. The episode terminates only when every requested target is present; an intermediate child should return a report instead.",
+    "task": "Craft the following additional items: 2x m2_0_r\n\nUse the registered crafting tools to complete the task. The environment is\nfinished only after you call `finish(...)`.",
+    "initial_context": {
+      "environment": "textcraft_synth",
+      "dataset": "textcraft-synth",
+      "split": "test",
+      "instance_id": 0,
+      "id": "generated-easy-101-0",
+      "difficulty": "easy",
+      "crafting_depth": 2
+    }
+  },
+  "tools": {
+    "craft": {
+      "kind": "callable",
+      "description": "Craft one output item by consuming exact ingredient counts. Arguments: craft(ingredients: dict[str, int], target: (item, output_count)). output_count must be divisible by the selected recipe result_count. Print the returned status."
+    },
+    "get_info": {
+      "kind": "callable",
+      "description": "Return current inventory counts, recipes, result counts, crafting depth, and whether each requested item can be crafted from the current inventory. Pass a list of item names; with no argument it reports the task targets. Print the result."
+    },
+    "view_inventory": {
+      "kind": "callable",
+      "description": "Return the current shared inventory. Print the result."
+    },
+    "finish": {
+      "kind": "callable",
+      "description": "Submit a short completion message. The episode terminates only when every requested target is present; an intermediate child should return a report instead."
+    }
+  },
+  "agent_result": {
+    "answer": "Successfully crafted 2x m2_0_r from raw materials. | success=True score=1.000",
+    "status": "environment_done",
+    "steps": 5,
+    "usage": {
+      "model_usage_summaries": {
+        "deepseek-v4-flash": {
+          "total_calls": 5,
+          "total_input_tokens": 6462,
+          "total_output_tokens": 780
+        }
+      },
+      "total_calls": 5,
+      "total_input_tokens": 6462,
+      "total_output_tokens": 780
+    },
+    "trace": {
+      "agent_id": "dad4824533e8444a8c597d2ed9437a1e",
+      "parent_id": null,
+      "depth": 0,
+      "task": "Craft the following additional items: 2x m2_0_r\n\nUse the registered crafting tools to complete the task. The environment is\nfinished only after you call `finish(...)`.",
+      "system_prompt": "You are a recursive agent harness. Solve the task in the user\nmessage using direct reasoning, Python execution, and recursive sub-agents when\nuseful.\n\nDecide whether to:\n- solve the task directly;\n- delegate one subtask; or\n- delegate multiple independent subtasks concurrently.\n\n### Tools\n\n#### Python\n\nExecute Python inside a `repl` block:\n\n```repl\n# Python code\n```\n\nREPL variables persist within the current agent.\n\n#### Sub-agents\n\nSub-agents must be called inside a `repl` block.\n\n```text\nspawn_subagent(task, context=None) -> str\n```\n\nRun one fresh sub-agent.\n\n```text\nspawn_subagents(requests) -> list[str]\n```\n\nRun multiple independent sub-agents concurrently. Each request contains `task`\nand optional `context`.\n\nPut the subtask instructions in `task`. Use `context` to pass required\ninformation or values from the current REPL.\n\nEach agent has an isolated context and REPL environment. Agents cannot access\nanother agent's variables or intermediate state. Any required information must\nbe passed explicitly through `task` or `context`.\n\n\n\n### Examples\n\n```repl\nresult = spawn_subagent(\n    task=\"Solve the supplied equation.\",\n    context={\"equation\": equation}\n)\n```\n\n```repl\nresults = spawn_subagents([\n    {\n        \"task\": \"Analyze approach A.\",\n        \"context\": {\"problem\": problem}\n    },\n    {\n        \"task\": \"Analyze approach B.\",\n        \"context\": {\"problem\": problem}\n    }\n])\n```\nA sub-agent must solve its assigned task rather than delegate an unchanged or\nsubstantially equivalent copy of that task.\n\nDelegate further only when the child can identify a smaller, distinct subtask\nwhose result is necessary for completing its own assignment.\n\n### Completion\n\n`answer` is a reserved completion dictionary provided by the harness.\n\nFinish by setting:\n\n```repl\nanswer[\"content\"] = final_text\nanswer[\"ready\"] = True\n```\n\n\nTextCraft-Synth guidance:\n\nYou are crafting additional requested quantities from a shared inventory. Use\n`view_inventory()` and `get_info(items)` before planning. Record the initial\ncount of each target: the required final count is its initial count plus the\nrequested amount.\n\nA recipe's output and ingredient counts are per execution. `craft` takes the\ntotal output quantity, which must be divisible by the recipe's `result_count`.\nScale ingredient counts by the required number of recipe executions, rounding\nthe output quantity up to a valid multiple when necessary.\n\nFor crafting depth 0-3, prefer solving directly. For depth 4 or more, if the\ntarget has two or more substantial independent direct branches, delegate those\nintermediate item/count pairs using `spawn_subagent` or `spawn_subagents` and\nreserve final assembly for yourself. Branches are independent only when they\ndo not depend on each other or compete for the same limited ingredients.\nOtherwise keep the work serial.\n\nDelegated agents share the live inventory and may recurse when their own task\nis still deep and branching. A child assigned an intermediate group should\nreturn a report to its caller and should not finish the whole episode.\n\nAfter delegation, check the inventory again, craft any remaining items, and\nassemble the final targets yourself. Call `finish(message)` only after verifying\nthat every target's final count is at least its initial count plus the requested\namount.\n\nCustom tools:\n- `craft`: Craft one output item by consuming exact ingredient counts. Arguments: craft(ingredients: dict[str, int], target: (item, output_count)). output_count must be divisible by the selected recipe result_count. Print the returned status.\n- `get_info`: Return current inventory counts, recipes, result counts, crafting depth, and whether each requested item can be crafted from the current inventory. Pass a list of item names; with no argument it reports the task targets. Print the result.\n- `view_inventory`: Return the current shared inventory. Print the result.\n- `finish`: Submit a short completion message. The episode terminates only when every requested target is present; an intermediate child should return a report instead.",
+      "steps": [
+        {
+          "number": 1,
+          "response": "Let me start by examining the inventory and available recipes.\n\n```repl\nview_inventory()\n```\n\n```repl\nget_info([\"m2_0_r\"])\n```",
+          "model_observation": "REPL output:\n(no output)\n\n(no output)",
+          "observation_truncated": false,
+          "code_executions": [
+            {
+              "code": "view_inventory()",
+              "stdout": "",
+              "error": null,
+              "variables": [
+                "context"
+              ],
+              "duration_seconds": 0.00012591667473316193
+            },
+            {
+              "code": "get_info([\"m2_0_r\"])",
+              "stdout": "",
+              "error": null,
+              "variables": [
+                "context"
+              ],
+              "duration_seconds": 0.00011131539940834045
+            }
+          ],
+          "duration_seconds": 1.6156303193420172
+        },
+        {
+          "number": 2,
+          "response": "Let me check the inventory and get info properly.\n\n```repl\nprint(view_inventory())\n```\n\n```repl\nprint(get_info([\"m2_0_r\"]))\n```",
+          "model_observation": "REPL output:\n{'raw_0_r00': 4, 'raw_0_r10': 2, 'raw_0_r20': 2}\n\n[{'item': 'm2_0_r', 'can_craft': False, 'is_base': False, 'in_inventory': 0, 'crafting_depth': 2, 'recipes': [{'ingredients': {'m1_0_r0': 1, 'm1_0_r1': 2, 'm1_0_r2': 2}, 'result_count': 1}]}]",
+          "observation_truncated": false,
+          "code_executions": [
+            {
+              "code": "print(view_inventory())",
+              "stdout": "{'raw_0_r00': 4, 'raw_0_r10': 2, 'raw_0_r20': 2}",
+              "error": null,
+              "variables": [
+                "context"
+              ],
+              "duration_seconds": 0.00016320683062076569
+            },
+            {
+              "code": "print(get_info([\"m2_0_r\"]))",
+              "stdout": "[{'item': 'm2_0_r', 'can_craft': False, 'is_base': False, 'in_inventory': 0, 'crafting_depth': 2, 'recipes': [{'ingredients': {'m1_0_r0': 1, 'm1_0_r1': 2, 'm1_0_r2': 2}, 'result_count': 1}]}]",
+              "error": null,
+              "variables": [
+                "context"
+              ],
+              "duration_seconds": 0.0001173894852399826
+            }
+          ],
+          "duration_seconds": 1.1383017357438803
+        },
+        {
+          "number": 3,
+          "response": "I need to craft 2x m2_0_r. The recipe requires:\n- 1x m1_0_r0\n- 2x m1_0_r1\n- 2x m1_0_r2\n\nLet me check what those intermediate items need.\n\n```repl\nprint(get_info([\"m1_0_r0\", \"m1_0_r1\", \"m1_0_r2\"]))\n```",
+          "model_observation": "REPL output:\n[{'item': 'm1_0_r0', 'can_craft': True, 'is_base': False, 'in_inventory': 0, 'crafting_depth': 1, 'recipes': [{'ingredients': {'raw_0_r00': 2}, 'result_count': 1}]}, {'item': 'm1_0_r1', 'can_craft': True, 'is_base': False, 'in_inventory': 0, 'crafting_depth': 1, 'recipes': [{'ingredients': {'raw_0_r10': 1}, 'result_count': 2}]}, {'item': 'm1_0_r2', 'can_craft': True, 'is_base': False, 'in_inventory': 0, 'crafting_depth': 1, 'recipes': [{'ingredients': {'raw_0_r20': 1}, 'result_count': 2}]}]",
+          "observation_truncated": false,
+          "code_executions": [
+            {
+              "code": "print(get_info([\"m1_0_r0\", \"m1_0_r1\", \"m1_0_r2\"]))",
+              "stdout": "[{'item': 'm1_0_r0', 'can_craft': True, 'is_base': False, 'in_inventory': 0, 'crafting_depth': 1, 'recipes': [{'ingredients': {'raw_0_r00': 2}, 'result_count': 1}]}, {'item': 'm1_0_r1', 'can_craft': True, 'is_base': False, 'in_inventory': 0, 'crafting_depth': 1, 'recipes': [{'ingredients': {'raw_0_r10': 1}, 'result_count': 2}]}, {'item': 'm1_0_r2', 'can_craft': True, 'is_base': False, 'in_inventory': 0, 'crafting_depth': 1, 'recipes': [{'ingredients': {'raw_0_r20': 1}, 'result_count': 2}]}]",
+              "error": null,
+              "variables": [
+                "context"
+              ],
+              "duration_seconds": 0.0002578999847173691
+            }
+          ],
+          "duration_seconds": 1.8139156233519316
+        },
+        {
+          "number": 4,
+          "response": "Now I have the full picture. Let me plan:\n\nFor 2x m2_0_r (recipe yields 1 per execution, so need 2 executions):\n- Need: 2x m1_0_r0, 4x m1_0_r1, 4x m1_0_r2\n\nFor m1_0_r0 (recipe yields 1, needs 2 raw_0_r00):\n- Need 2x m1_0_r0 → 2 executions → 4 raw_0_r00 (have 4 ✓)\n\nFor m1_0_r1 (recipe yields 2, needs 1 raw_0_r10):\n- Need 4x m1_0_r1 → 2 executions → 2 raw_0_r10 (have 2 ✓)\n\nFor m1_0_r2 (recipe yields 2, needs 1 raw_0_r20):\n- Need 4x m1_0_r2 → 2 executions → 2 raw_0_r20 (have 2 ✓)\n\nLet me craft the intermediate items first.\n\n```repl\n# Craft m1_0_r0: need 2, recipe yields 1, so 2 executions\ncraft({\"raw_0_r00\": 2}, (\"m1_0_r0\", 1))\ncraft({\"raw_0_r00\": 2}, (\"m1_0_r0\", 1))\n```\n\n```repl\n# Craft m1_0_r1: need 4, recipe yields 2 per execution, so 2 executions\ncraft({\"raw_0_r10\": 1}, (\"m1_0_r1\", 2))\ncraft({\"raw_0_r10\": 1}, (\"m1_0_r1\", 2))\n```\n\n```repl\n# Craft m1_0_r2: need 4, recipe yields 2 per execution, so 2 executions\ncraft({\"raw_0_r20\": 1}, (\"m1_0_r2\", 2))\ncraft({\"raw_0_r20\": 1}, (\"m1_0_r2\", 2))\n```\n\n```repl\n# Now craft 2x m2_0_r (recipe yields 1, need 2 executions)\ncraft({\"m1_0_r0\": 1, \"m1_0_r1\": 2, \"m1_0_r2\": 2}, (\"m2_0_r\", 1))\ncraft({\"m1_0_r0\": 1, \"m1_0_r1\": 2, \"m1_0_r2\": 2}, (\"m2_0_r\", 1))\n```\n\n```repl\n# Verify\nprint(view_inventory())\n```",
+          "model_observation": "REPL output:\n(no output)\n\n(no output)\n\n(no output)\n\n(no output)\n\n{'m2_0_r': 2}",
+          "observation_truncated": false,
+          "code_executions": [
+            {
+              "code": "# Craft m1_0_r0: need 2, recipe yields 1, so 2 executions\ncraft({\"raw_0_r00\": 2}, (\"m1_0_r0\", 1))\ncraft({\"raw_0_r00\": 2}, (\"m1_0_r0\", 1))",
+              "stdout": "",
+              "error": null,
+              "variables": [
+                "context"
+              ],
+              "duration_seconds": 0.0003349669277667999
+            },
+            {
+              "code": "# Craft m1_0_r1: need 4, recipe yields 2 per execution, so 2 executions\ncraft({\"raw_0_r10\": 1}, (\"m1_0_r1\", 2))\ncraft({\"raw_0_r10\": 1}, (\"m1_0_r1\", 2))",
+              "stdout": "",
+              "error": null,
+              "variables": [
+                "context"
+              ],
+              "duration_seconds": 0.00016583316028118134
+            },
+            {
+              "code": "# Craft m1_0_r2: need 4, recipe yields 2 per execution, so 2 executions\ncraft({\"raw_0_r20\": 1}, (\"m1_0_r2\", 2))\ncraft({\"raw_0_r20\": 1}, (\"m1_0_r2\", 2))",
+              "stdout": "",
+              "error": null,
+              "variables": [
+                "context"
+              ],
+              "duration_seconds": 0.00013918988406658173
+            },
+            {
+              "code": "# Now craft 2x m2_0_r (recipe yields 1, need 2 executions)\ncraft({\"m1_0_r0\": 1, \"m1_0_r1\": 2, \"m1_0_r2\": 2}, (\"m2_0_r\", 1))\ncraft({\"m1_0_r0\": 1, \"m1_0_r1\": 2, \"m1_0_r2\": 2}, (\"m2_0_r\", 1))",
+              "stdout": "",
+              "error": null,
+              "variables": [
+                "context"
+              ],
+              "duration_seconds": 0.00018502213060855865
+            },
+            {
+              "code": "# Verify\nprint(view_inventory())",
+              "stdout": "{'m2_0_r': 2}",
+              "error": null,
+              "variables": [
+                "context"
+              ],
+              "duration_seconds": 8.670054376125336e-05
+            }
+          ],
+          "duration_seconds": 5.346655979752541
+        },
+        {
+          "number": 5,
+          "response": "All 2x m2_0_r have been crafted successfully. Let me finish.\n\n```repl\nfinish(\"Successfully crafted 2x m2_0_r from raw materials.\")\n```",
+          "model_observation": null,
+          "observation_truncated": false,
+          "code_executions": [
+            {
+              "code": "finish(\"Successfully crafted 2x m2_0_r from raw materials.\")",
+              "stdout": "",
+              "error": null,
+              "variables": [
+                "context"
+              ],
+              "duration_seconds": 0.000258689746260643
+            }
+          ],
+          "duration_seconds": 1.0205369293689728
+        }
+      ],
+      "children": [],
+      "forced_final_response": null,
+      "usage": {
+        "model_usage_summaries": {
+          "deepseek-v4-flash": {
+            "total_calls": 5,
+            "total_input_tokens": 6462,
+            "total_output_tokens": 780
+          }
+        },
+        "total_calls": 5,
+        "total_input_tokens": 6462,
+        "total_output_tokens": 780
+      },
+      "status": "environment_done",
+      "answer": "Successfully crafted 2x m2_0_r from raw materials. | success=True score=1.000",
+      "error": null,
+      "duration_seconds": 10.979616422206163
+    }
+  },
+  "environment_report": {
+    "environment": "textcraft_synth",
+    "dataset": "textcraft-synth",
+    "split": "test",
+    "instance_id": 0,
+    "id": "generated-easy-101-0",
+    "difficulty": "easy",
+    "crafting_depth": 2,
+    "initial_inventory": {
+      "raw_0_r00": 4,
+      "raw_0_r10": 2,
+      "raw_0_r20": 2
+    },
+    "targets": {
+      "m2_0_r": 2
+    },
+    "inventory": {
+      "m2_0_r": 2
+    },
+    "required_final_inventory": {
+      "m2_0_r": 2
+    },
+    "missing": {},
+    "success": true,
+    "score": 1.0,
+    "finished": true,
+    "finish_attempts": 1,
+    "finish_message": "Successfully crafted 2x m2_0_r from raw materials. | success=True score=1.000",
+    "craft_calls": 8,
+    "craft_history": [
+      {
+        "item": "m1_0_r0",
+        "output_count": 1,
+        "ingredients": {
+          "raw_0_r00": 2
+        },
+        "inventory_after": {
+          "raw_0_r00": 2,
+          "raw_0_r10": 2,
+          "raw_0_r20": 2,
+          "m1_0_r0": 1
+        }
+      },
+      {
+        "item": "m1_0_r0",
+        "output_count": 1,
+        "ingredients": {
+          "raw_0_r00": 2
+        },
+        "inventory_after": {
+          "raw_0_r10": 2,
+          "raw_0_r20": 2,
+          "m1_0_r0": 2
+        }
+      },
+      {
+        "item": "m1_0_r1",
+        "output_count": 2,
+        "ingredients": {
+          "raw_0_r10": 1
+        },
+        "inventory_after": {
+          "raw_0_r10": 1,
+          "raw_0_r20": 2,
+          "m1_0_r0": 2,
+          "m1_0_r1": 2
+        }
+      },
+      {
+        "item": "m1_0_r1",
+        "output_count": 2,
+        "ingredients": {
+          "raw_0_r10": 1
+        },
+        "inventory_after": {
+          "raw_0_r20": 2,
+          "m1_0_r0": 2,
+          "m1_0_r1": 4
+        }
+      },
+      {
+        "item": "m1_0_r2",
+        "output_count": 2,
+        "ingredients": {
+          "raw_0_r20": 1
+        },
+        "inventory_after": {
+          "raw_0_r20": 1,
+          "m1_0_r0": 2,
+          "m1_0_r1": 4,
+          "m1_0_r2": 2
+        }
+      },
+      {
+        "item": "m1_0_r2",
+        "output_count": 2,
+        "ingredients": {
+          "raw_0_r20": 1
+        },
+        "inventory_after": {
+          "m1_0_r0": 2,
+          "m1_0_r1": 4,
+          "m1_0_r2": 4
+        }
+      },
+      {
+        "item": "m2_0_r",
+        "output_count": 1,
+        "ingredients": {
+          "m1_0_r0": 1,
+          "m1_0_r1": 2,
+          "m1_0_r2": 2
+        },
+        "inventory_after": {
+          "m1_0_r0": 1,
+          "m1_0_r1": 2,
+          "m1_0_r2": 2,
+          "m2_0_r": 1
+        }
+      },
+      {
+        "item": "m2_0_r",
+        "output_count": 1,
+        "ingredients": {
+          "m1_0_r0": 1,
+          "m1_0_r1": 2,
+          "m1_0_r2": 2
+        },
+        "inventory_after": {
+          "m2_0_r": 2
+        }
+      }
+    ],
+    "tool_errors": [],
+    "source": "generated"
+  }
+}

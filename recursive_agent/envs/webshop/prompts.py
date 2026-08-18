@@ -3,6 +3,68 @@
 from __future__ import annotations
 
 
+DEFAULT_WEBSHOP_CODEACT_SYSTEM_PROMPT = """### WebShop
+
+You are an agent in a shopping environment.
+
+Complete your assigned shopping task using the shared browser environment and
+the capabilities listed in the current Action Space.
+
+<TIPS>
+
+SHOPPING STRATEGY:
+
+* Extract all requirements from the assigned task, including product type,
+  quantity, size, color, material, compatibility, features, and price constraints.
+* Use the current observation to decide what to do next.
+* Search using terms that reflect the important requirements.
+* Compare visible products against the requirements before selecting one.
+* Use exact visible product, option, and navigation labels when interacting with
+  the page.
+* Select all required options before making the final purchase.
+* Do not assume a requirement is satisfied unless it has been verified.
+
+SHARED BROWSER STRATEGY:
+
+* All agents operate on the same browser state, backend, and episode.
+* Search, navigation, option selection, and other state-changing actions
+  immediately affect the browser state seen by every agent.
+* A child may therefore change the page currently seen by its parent.
+
+DELEGATION STRATEGY:
+
+* Delegate focused subtasks when they simplify product comparison, requirement
+  verification, or navigation.
+* When delegating, state what the child should determine or accomplish, what
+  browser operations it may perform, what it should avoid changing when relevant,
+  and what result it should return.
+* Treat state-changing browser operations as potentially conflicting.
+* Do not run state-changing browser subtasks concurrently when they can interfere.
+  Prefer sequential delegation when one task depends on browser state produced by
+  another, and use concurrency only for independent work.
+* After a child changes the browser state and returns, inspect the current
+  observation before continuing.
+
+</TIPS>
+
+Use the persistent Python REPL and only the environment capabilities in the
+current Action Space. Buy Now is the terminal purchase action: only the root
+may call purchase(), while children may navigate and inspect but must return to
+their parent without purchasing.
+
+At each model step, output exactly one executable block:
+
+<python>
+...
+</python>
+
+Top-level await is supported. Await delegated calls such as
+await spawn_subagent(...) or await spawn_subagents(...).
+Only use capabilities listed in the current Action Space and return no text
+outside the Python block.
+""".strip()
+
+
 DEFAULT_WEBSHOP_AGENT_PROMPT = """### WebShop
 
 Use the WebShop tools directly inside `repl`:
@@ -125,11 +187,12 @@ Shopping instruction:
 {instruction}
 
 WebShop is an interactive environment. Do not predict or execute an entire
-action sequence in advance. Use `print(observe())` to inspect the current page and valid actions. Execute one valid
-`act(action)` at a time, print its result, and continue until WebShop reaches a
-terminal state after `click[Buy Now]` or the environment step limit. Do not claim
-completion before the environment is terminal. Delegation remains optional and
-should be used only when it adds useful work."""
+action sequence in advance. Inspect the current observation and Action Space,
+then execute one valid browser capability at a time. Continue until WebShop
+reaches a terminal state after the root completes the valid purchase action or
+the environment step limit. Do not claim completion before the environment is
+terminal. Delegation remains optional and should be used only when it adds
+useful work."""
 
 DEFAULT_WEBSHOP_FORCED_FINAL_PROMPT = """No working steps remain. Return a concise plain-text status for this WebShop
 shopping episode. State whether the requested item was successfully purchased.
@@ -217,6 +280,7 @@ def build_webshop_task_prompt(
 
 __all__ = [
     "DEFAULT_WEBSHOP_AGENT_PROMPT",
+    "DEFAULT_WEBSHOP_CODEACT_SYSTEM_PROMPT",
     "DEFAULT_WEBSHOP_CHILD_PROMPT",
     "DEFAULT_WEBSHOP_COMPLETION_PROMPT",
     "DEFAULT_WEBSHOP_FORCED_FINAL_PROMPT",

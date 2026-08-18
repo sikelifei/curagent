@@ -155,6 +155,34 @@ class WebShopEnvironmentTests(unittest.TestCase):
         environment.close()
         self.assertEqual(backend.close_calls, 1)
 
+    def test_codeact_capabilities_are_role_safe_and_live(self) -> None:
+        backend = FakeWebShopBackend()
+        environment = self.make_environment(backend)
+        root = environment.codeact_capabilities(is_root=True, depth=0)
+        child = environment.codeact_capabilities(is_root=False, depth=1)
+
+        self.assertIn("purchase", root)
+        self.assertNotIn("return_to_parent", root)
+        self.assertNotIn("purchase", child)
+        self.assertIn("observe", child)
+        self.assertIn("search", child)
+        self.assertIn("click", child)
+        self.assertIn("available_actions", child)
+        self.assertIn("episode_report", child)
+        self.assertIn("shopping_instruction", child)
+        self.assertEqual(root["shopping_instruction"].runtime_value, environment.instruction)
+
+        with self.assertRaisesRegex(ValueError, "purchase"):
+            child["click"].runtime_value("Buy Now")
+        self.assertEqual(backend.actions, [])
+        self.assertFalse(backend.done)
+
+        with self.assertRaisesRegex(RuntimeError, "purchase.*automatically") as raised:
+            environment.finalize_root("premature")
+        self.assertNotIn("finish", str(raised.exception).casefold())
+        self.assertEqual(backend.actions, [])
+        environment.close()
+
     def test_registry_creates_webshop_plugin(self) -> None:
         self.assertIn("webshop", available_environments())
         environment = create_environment(
@@ -167,9 +195,10 @@ class WebShopEnvironmentTests(unittest.TestCase):
         self.assertIsInstance(environment, ReCodeWebShopEnvironment)
         environment.close()
 
-    def test_environment_runner_wires_tools_prompt_and_termination(self) -> None:
+    def test_environment_runner_uses_shared_codeact_webshop_episode(self) -> None:
         backend = FakeWebShopBackend()
         environment = self.make_environment(backend)
+        self.assertTrue(environment.use_recursive_codeact_harness)
         config = self.root / "model.yaml"
         config.write_text(
             "model:\n"
@@ -180,27 +209,56 @@ class WebShopEnvironmentTests(unittest.TestCase):
             encoding="utf-8",
         )
 
+        root_action_spaces: list[str] = []
+        child_action_spaces: list[str] = []
+        root_observed_stages: list[int] = []
+
         def handler(messages, timeout):
-            observations = [
-                message["content"]
-                for message in messages
-                if message["role"] == "user" and message["content"].startswith("REPL output:")
-            ]
-            actions = (
-                "search[red product]",
-                "click[item1]",
-                "click[red]",
-                "click[buy now]",
-            )
-            action = actions[len(observations)]
-            return f"```repl\nstate = act({action!r})\nprint(state)\n```"
+            initial_user = messages[1]["content"]
+            is_child = "Navigate to the product page and search for the red product." in initial_user
+            action_space = initial_user.split("# Action Space\n", 1)[1]
+            if is_child:
+                child_action_spaces.append(action_space)
+                child_turn = len(child_action_spaces)
+                if child_turn == 1:
+                    return (
+                        "<python>\n"
+                        "state = search('red product')\n"
+                        "print(state)\n"
+                        "</python>"
+                    )
+                return (
+                    "<python>\n"
+                    "return_to_parent('searched red product')\n"
+                    "</python>"
+                )
+
+            root_action_spaces.append(action_space)
+            root_turn = len(root_action_spaces)
+            if root_turn == 2:
+                root_observed_stages.append(backend.stage)
+                return "<python>\nstate = observe()\nprint(state)\n</python>"
+            responses = {
+                1: (
+                    "<python>\n"
+                    "child_result = await spawn_subagent("
+                    "'Navigate to the product page and search for the red product.'"
+                    ")\n"
+                    "print(child_result)\n"
+                    "</python>"
+                ),
+                3: "<python>\nstate = click('item1')\nprint(state)\n</python>",
+                4: "<python>\nstate = click('red')\nprint(state)\n</python>",
+                5: "<python>\nstate = purchase()\nprint(state)\n</python>",
+            }
+            return responses[root_turn]
 
         factory = FakeFactory(handler)
         run = run_environment(
             environment,
             model_config=config,
             agent_kwargs={
-                "max_steps": 5,
+                "max_steps": 7,
                 "max_depth": 1,
                 "client_factory": factory,
             },
@@ -208,32 +266,47 @@ class WebShopEnvironmentTests(unittest.TestCase):
         self.assertEqual(run.agent_result.status, "environment_done")
         self.assertEqual(run.environment_report["reward"], 1.0)
         self.assertEqual(run.environment_report["steps"], 4)
+        self.assertEqual(backend.actions, [
+            "search[red product]",
+            "click[item1]",
+            "click[red]",
+            "click[buy now]",
+        ])
+        self.assertEqual(factory.created, 1)
+        self.assertEqual(factory.closed_clients, 1)
         self.assertEqual(backend.close_calls, 1)
-        self.assertIn("find a red test product", factory.calls[0][1]["content"])
-        self.assertIn("observe", factory.calls[0][0]["content"])
-        self.assertIn("act", factory.calls[0][0]["content"])
+        self.assertEqual(root_observed_stages, [1])
+        self.assertEqual(len(run.agent_result.trace.children), 1)
+        self.assertEqual(run.agent_result.trace.children[0].status, "completed")
+
         system_prompt = factory.calls[0][0]["content"]
-        self.assertEqual(system_prompt, environment.root_prompt)
-        self.assertNotIn("Custom tools:", system_prompt)
-        self.assertNotIn("recursive agent harness", system_prompt)
-        self.assertIn("### WebShop", system_prompt)
-        self.assertIn("do not use `spawn_subagents`", system_prompt)
-        self.assertIn("Never execute template text", system_prompt)
-        self.assertIn("search[wireless mouse under 30 dollars]", system_prompt)
-        self.assertIn("every block below is a separate model step", system_prompt)
-        self.assertIn("search[argan oil paraben free 2 oz]", system_prompt)
-        self.assertIn("click[2 fl oz (pack of 2)]", system_prompt)
+        self.assertEqual(system_prompt, environment.environment_system_prompt)
+        self.assertIn("shared browser", system_prompt)
+        self.assertIn("state-changing", system_prompt)
+        self.assertIn("await spawn_subagent", system_prompt)
+        self.assertIn("exactly one executable block", system_prompt)
+        self.assertIn("<python>", system_prompt)
+        self.assertIn("current Action Space", system_prompt)
+        self.assertNotIn(environment.instruction, system_prompt)
+        self.assertNotIn("# Task", system_prompt)
+        self.assertIn("purchase", root_action_spaces[0])
+        self.assertIn("finish", root_action_spaces[0])
+        self.assertNotIn("return_to_parent", root_action_spaces[0])
+        self.assertIn("return_to_parent", child_action_spaces[0])
+        self.assertNotIn("purchase", child_action_spaces[0])
+        self.assertNotIn("finish", child_action_spaces[0])
         exported = run.to_trace_dict()
         serialized = json.dumps(exported)
         self.assertNotIn("super-secret-api-key", serialized)
         self.assertEqual(exported["prompts"]["task"], environment.task)
-        self.assertEqual(exported["tools"]["act"]["kind"], "callable")
+        self.assertEqual(exported["tools"]["purchase"]["kind"], "callable")
+        self.assertIn("search", exported["tools"])
         first_execution = exported["agent_result"]["trace"]["steps"][0][
             "code_executions"
         ][0]
-        self.assertIn("act('search[red product]')", first_execution["code"])
-        self.assertIn("page after search[red product]", first_execution["stdout"])
-        self.assertIn("state", first_execution["variables"])
+        self.assertIn("await spawn_subagent", first_execution["code"])
+        self.assertIn("searched red product", first_execution["stdout"])
+        self.assertIn("child_result", first_execution["variables"])
 
 
 if __name__ == "__main__":

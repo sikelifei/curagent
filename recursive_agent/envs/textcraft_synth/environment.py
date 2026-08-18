@@ -7,6 +7,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from ...tools import CapabilityCollection
 from ...types import EnvironmentStatus
 from ..base import AgentEnvironment
 from ..registry import register_environment
@@ -30,7 +31,7 @@ from .prompts import (
     build_textcraft_task_prompt,
 )
 from .scoring import evaluate_inventory
-from .tools import build_textcraft_tools
+from .tools import build_textcraft_capabilities, build_textcraft_tools
 
 
 @register_environment("textcraft_synth")
@@ -78,6 +79,7 @@ class TextCraftSynthEnvironment(AgentEnvironment):
         self._errors: list[str] = []
         self._lock = threading.RLock()
         self._tools = build_textcraft_tools(self)
+        self._codeact_capabilities = build_textcraft_capabilities(self)
         self._context = {
             "environment": self.name,
             "dataset": self.dataset.dataset_name,
@@ -94,6 +96,15 @@ class TextCraftSynthEnvironment(AgentEnvironment):
 
     @property
     def agent_prompt(self) -> str:
+        return self._agent_prompt
+
+    @property
+    def use_recursive_codeact_harness(self) -> bool:
+        return True
+
+    @property
+    def environment_system_prompt(self) -> str:
+        """Return the environment-owned prompt used by every scheduler node."""
         return self._agent_prompt
 
     @property
@@ -134,6 +145,52 @@ class TextCraftSynthEnvironment(AgentEnvironment):
 
     def tools(self) -> dict[str, Any]:
         return dict(self._tools)
+
+    def codeact_capabilities(
+        self,
+        is_root: bool,
+        depth: int,
+    ) -> CapabilityCollection:
+        del is_root, depth
+        return self._codeact_capabilities
+
+    def observe(self) -> dict[str, Any]:
+        """Return a serializable snapshot of the live shared crafting state."""
+        with self._lock:
+            evaluation = self._evaluation()
+            inventory = dict(sorted(evaluation.inventory.items()))
+            targets = dict(sorted(self.sample.targets.items()))
+            required = dict(sorted(evaluation.required.items()))
+            missing = dict(sorted(evaluation.missing.items()))
+            progress = {
+                item: {
+                    "current": inventory.get(item, 0),
+                    "required": required[item],
+                    "additional": targets[item],
+                    "missing": missing.get(item, 0),
+                    "complete": item not in missing,
+                }
+                for item in targets
+            }
+            return {
+                "environment": self.name,
+                "dataset": self.dataset.dataset_name,
+                "split": self.dataset.split,
+                "instance_id": self.sample.index,
+                "id": self.sample.sample_id,
+                "difficulty": self.sample.difficulty,
+                "crafting_depth": self.sample.crafting_depth,
+                "initial_inventory": dict(sorted(self.sample.initial_inventory.items())),
+                "inventory": inventory,
+                "targets": targets,
+                "additional_requirements": targets,
+                "required_final_inventory": required,
+                "missing": missing,
+                "progress": progress,
+                "finished": self._finished,
+                "finish_attempts": self._finish_attempts,
+                "craft_calls": len(self._craft_history),
+            }
 
     def view_inventory(self) -> dict[str, int]:
         with self._lock:
@@ -218,12 +275,22 @@ class TextCraftSynthEnvironment(AgentEnvironment):
                     f"Not finished: requested targets are still missing "
                     f"{evaluation.missing}. Continue crafting and check the inventory."
                 )
-            self._finished = True
-            self._finish_message = (
-                f"{str(message).strip()} | success={evaluation.success} "
-                f"score={evaluation.score:.3f}"
-            )
-            return self._finish_message
+            return self._mark_finished(message, evaluation)
+
+    def finalize_root(self, result: Any = None) -> str:
+        """Finalize the root only after the shared inventory reaches its target."""
+        with self._lock:
+            if self._finished:
+                return self._finish_message or "TextCraft episode already finished."
+            evaluation = self._evaluation()
+            self._finish_attempts += 1
+            if not evaluation.success:
+                raise RuntimeError(
+                    "TextCraft targets are incomplete; missing quantities: "
+                    f"{evaluation.missing}. Current inventory: {evaluation.inventory}. "
+                    "Craft the missing items, re-observe, and try finish again."
+                )
+            return self._mark_finished(result, evaluation)
 
     def status(self) -> EnvironmentStatus:
         with self._lock:
@@ -272,6 +339,14 @@ class TextCraftSynthEnvironment(AgentEnvironment):
             targets=self.sample.targets,
             inventory=self._inventory,
         )
+
+    def _mark_finished(self, message: Any, evaluation: Any) -> str:
+        self._finished = True
+        self._finish_message = (
+            f"{str(message).strip()} | success={evaluation.success} "
+            f"score={evaluation.score:.3f}"
+        )
+        return self._finish_message
 
     def _item_info(self, item: str) -> dict[str, Any]:
         recipes = self.sample.recipes.get(item, ())

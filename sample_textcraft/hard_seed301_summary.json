@@ -1,0 +1,30 @@
+{
+  "environment": "textcraft_synth",
+  "model": "deepseek-v4-flash (from config)",
+  "requested_rows": 1,
+  "recorded_rows": 1,
+  "successful_runs": 0,
+  "task_successes": 0,
+  "score": 0.0,
+  "score_percent": 0.0,
+  "by_difficulty": {
+    "unknown": {
+      "n": 1,
+      "score": 0.0
+    }
+  },
+  "rows": [
+    {
+      "instance_id": 0,
+      "ok": false,
+      "duration_seconds": 232.81410821713507,
+      "success": false,
+      "score": 0.0,
+      "steps": 0,
+      "recursive_children": 0,
+      "max_trace_depth": 0,
+      "error_type": "ModelCallError",
+      "error": "Model call failed: APIConnectionError: Connection error."
+    }
+  ]
+}

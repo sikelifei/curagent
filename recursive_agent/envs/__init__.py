@@ -1,6 +1,7 @@
 """Environment plugins, tool registration, and dataset prompt adapters."""
 
 from .base import AgentEnvironment, EnvironmentDependencyError
+from ..tools import Capabilities, Capability, CapabilityCollection
 from .registry import available_environments, create_environment, register_environment
 from .runner import EnvironmentRunResult, run_environment, run_registered_environment
 from .trace_analysis import aggregate_trace_metrics, analyze_environment_trace
@@ -16,6 +17,9 @@ from . import webshop as webshop
 
 __all__ = [
     "AgentEnvironment",
+    "Capability",
+    "Capabilities",
+    "CapabilityCollection",
     "EnvironmentDependencyError",
     "EnvironmentRunResult",
     "available_environments",

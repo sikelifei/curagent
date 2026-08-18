@@ -5,7 +5,15 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-AgentStatus = Literal["completed", "forced_final", "environment_done"]
+AgentStatus = Literal[
+    "completed",
+    "forced_final",
+    "environment_done",
+    "budget_exhausted",
+    "error",
+    "cancelled",
+    "timeout",
+]
 
 
 @dataclass

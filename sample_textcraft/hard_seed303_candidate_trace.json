@@ -1,0 +1,12 @@
+{
+  "instance_id": 0,
+  "ok": false,
+  "duration_seconds": 315.40344710461795,
+  "success": false,
+  "score": 0.0,
+  "steps": 0,
+  "recursive_children": 0,
+  "max_trace_depth": 0,
+  "error_type": "ModelCallError",
+  "error": "Model call failed: APIConnectionError: Connection error."
+}

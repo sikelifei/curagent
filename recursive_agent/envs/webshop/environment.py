@@ -13,12 +13,14 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
+from ...tools import CapabilityCollection
 from ...types import EnvironmentStatus
 from ..base import AgentEnvironment, EnvironmentDependencyError
 from ..registry import register_environment
 from .dataset import WebShopDataset, WebShopSample
 from .prompts import (
     DEFAULT_WEBSHOP_AGENT_PROMPT,
+    DEFAULT_WEBSHOP_CODEACT_SYSTEM_PROMPT,
     DEFAULT_WEBSHOP_CHILD_PROMPT,
     DEFAULT_WEBSHOP_COMPLETION_PROMPT,
     DEFAULT_WEBSHOP_FORCED_FINAL_PROMPT,
@@ -28,7 +30,7 @@ from .prompts import (
     DEFAULT_WEBSHOP_TASK_TEMPLATE,
     DEFAULT_WEBSHOP_ROOT_PROMPT,
 )
-from .tools import build_webshop_tools
+from .tools import build_webshop_capabilities, build_webshop_tools
 
 _ACTION_PATTERN = re.compile(r"^(search|click)\[(.*)\]$", re.IGNORECASE | re.DOTALL)
 
@@ -84,8 +86,6 @@ class ReCodeWebShopEnvironment(AgentEnvironment):
             "session_id": self.sample.session_id,
             "seed": self.seed,
             "instruction": self.instruction,
-            "initial_observation": initial_observation,
-            "initial_valid_actions": self.available_actions(),
         }
         self._tools = build_webshop_tools(self)
 
@@ -96,6 +96,15 @@ class ReCodeWebShopEnvironment(AgentEnvironment):
     @property
     def agent_prompt(self) -> str:
         return DEFAULT_WEBSHOP_AGENT_PROMPT
+
+    @property
+    def use_recursive_codeact_harness(self) -> bool:
+        return True
+
+    @property
+    def environment_system_prompt(self) -> str:
+        """Return static WebShop guidance shared by every scheduler node."""
+        return DEFAULT_WEBSHOP_CODEACT_SYSTEM_PROMPT
 
     @property
     def root_prompt(self) -> str:
@@ -136,6 +145,17 @@ class ReCodeWebShopEnvironment(AgentEnvironment):
     def tools(self) -> dict[str, Any]:
         return dict(self._tools)
 
+    def codeact_capabilities(
+        self,
+        is_root: bool,
+        depth: int,
+    ) -> CapabilityCollection:
+        if not isinstance(is_root, bool):
+            raise TypeError("is_root must be a bool")
+        if not isinstance(depth, int) or isinstance(depth, bool) or depth < 0:
+            raise ValueError("depth must be a non-negative integer")
+        return build_webshop_capabilities(self, is_root=is_root)
+
     def observe(self) -> dict[str, Any]:
         return {
             "instruction": self.instruction,
@@ -154,6 +174,36 @@ class ReCodeWebShopEnvironment(AgentEnvironment):
         normalized = self._normalize_action(action)
         _run_awaitable(self._backend.run(normalized))
         return self.observe()
+
+    def search(self, query: str) -> dict[str, Any]:
+        """Search the current shared browser and return its live observation."""
+        if not isinstance(query, str):
+            raise TypeError("WebShop search query must be a string")
+        return self.act(f"search[{query}]")
+
+    def click(self, label: str) -> dict[str, Any]:
+        """Click one current non-terminal visible label."""
+        if not isinstance(label, str):
+            raise TypeError("WebShop click label must be a string")
+        compact = " ".join(label.strip().split())
+        if compact.casefold() == "buy now":
+            raise ValueError(
+                "Buy Now is the terminal purchase action; call purchase() from the "
+                "root action space."
+            )
+        return self.act(f"click[{compact}]")
+
+    def purchase(self) -> dict[str, Any]:
+        """Execute the currently valid terminal Buy Now action for the root."""
+        valid = self.available_actions()
+        if not any(
+            candidate.casefold() == "click[buy now]" for candidate in valid
+        ):
+            raise ValueError(
+                "Buy Now is not currently valid. Inspect available_actions(), "
+                "complete the required navigation, and try purchase() again."
+            )
+        return self.act("click[Buy Now]")
 
     def available_actions(self) -> list[str]:
         if self._backend.is_done():
@@ -187,6 +237,16 @@ class ReCodeWebShopEnvironment(AgentEnvironment):
             final_answer=answer,
             reason="success" if report["success"] else "terminal_without_success",
         )
+
+    def finalize_root(self, result: Any = None) -> Any:
+        """Allow framework ``finish`` only after a successful purchase."""
+        if not self._backend.is_done() or not self._backend.is_success():
+            raise RuntimeError(
+                "WebShop is not complete: use the current Action Space to navigate "
+                "to a valid Buy Now action, then call purchase(); a successful "
+                "purchase terminates the episode automatically."
+            )
+        return result
 
     def report(self) -> dict[str, Any]:
         raw = self._backend.report() or {}

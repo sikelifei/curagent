@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
+from ...tools import CapabilityCollection
+
 
 class TextCraftToolTarget(Protocol):
     def craft(self, ingredients: dict[str, int], target: tuple[str, int]) -> str: ...
@@ -15,7 +17,7 @@ class TextCraftToolTarget(Protocol):
     def finish(self, message: str) -> str: ...
 
 
-def build_textcraft_tools(target: TextCraftToolTarget) -> dict[str, Any]:
+def _textcraft_capability_entries(target: TextCraftToolTarget) -> dict[str, dict[str, Any]]:
     return {
         "craft": {
             "tool": target.craft,
@@ -39,14 +41,35 @@ def build_textcraft_tools(target: TextCraftToolTarget) -> dict[str, Any]:
             "tool": target.view_inventory,
             "description": "Return the current shared inventory. Print the result.",
         },
-        "finish": {
-            "tool": target.finish,
-            "description": (
-                "Submit a short completion message. The episode terminates only "
-                "when every requested target is present."
-            ),
-        },
     }
 
 
-__all__ = ["TextCraftToolTarget", "build_textcraft_tools"]
+def build_textcraft_capabilities(target: TextCraftToolTarget) -> CapabilityCollection:
+    """Build the environment-owned CodeAct action space.
+
+    Root/child termination and recursive delegation are supplied by the generic
+    scheduler. The legacy ``finish`` tool intentionally remains outside this
+    collection for direct ``RecursiveAgent`` compatibility.
+    """
+
+    return CapabilityCollection(_textcraft_capability_entries(target))
+
+
+def build_textcraft_tools(target: TextCraftToolTarget) -> dict[str, Any]:
+    """Return the legacy tool mapping, including its environment-owned finish."""
+    tools = _textcraft_capability_entries(target)
+    tools["finish"] = {
+        "tool": target.finish,
+        "description": (
+            "Submit a short completion message. The episode terminates only "
+            "when every requested target is present."
+        ),
+    }
+    return tools
+
+
+__all__ = [
+    "TextCraftToolTarget",
+    "build_textcraft_capabilities",
+    "build_textcraft_tools",
+]

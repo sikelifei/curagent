@@ -1,16 +1,21 @@
 from __future__ import annotations
 
+import ast
 import json
 import tempfile
+import threading
 import unittest
 from collections import Counter
 from pathlib import Path
 
 from recursive_agent.envs import available_environments
+from recursive_agent.envs.runner import run_environment
 from recursive_agent.envs.oolong_synth import (
     CHUNK_CHAR_LIMIT,
+    DEFAULT_OOLONG_SYNTH_CODEACT_SYSTEM_PROMPT,
     DEFAULT_OOLONG_SYNTH_TOOLS_PROMPT,
     DEFAULT_OOLONG_SYNTH_PROMPT,
+    LEGACY_CHUNK_CHAR_LIMIT,
     DEFAULT_SYNTH_AGENT_PROMPT,
     DEFAULT_SYNTH_CHILD_PROMPT,
     DEFAULT_SYNTH_ROOT_PROMPT,
@@ -21,6 +26,7 @@ from recursive_agent.envs.oolong_synth import (
     select_protocol_indices,
 )
 from recursive_agent.prompts import build_initial_user
+from tests.fakes import FakeFactory
 
 
 def sample_row(answer: str = "[3]", *, context_len: int = 1024) -> dict:
@@ -137,8 +143,9 @@ class OolongSynthEnvironmentTests(unittest.TestCase):
         lengths = Counter(metadata[index]["context_len"] for index in first)
         self.assertEqual(set(lengths.values()), {15, 16})
 
-    def test_prompt_uses_single_32k_root_worker_flow(self) -> None:
-        self.assertEqual(CHUNK_CHAR_LIMIT, 32_768)
+    def test_prompt_preserves_legacy_flow_and_uses_codeact_threshold(self) -> None:
+        self.assertEqual(CHUNK_CHAR_LIMIT, 65_536)
+        self.assertEqual(LEGACY_CHUNK_CHAR_LIMIT, 32_768)
         self.assertEqual(DEFAULT_SYNTH_AGENT_PROMPT, DEFAULT_OOLONG_SYNTH_PROMPT)
         for text in (
             'question = context["question"]',
@@ -171,7 +178,8 @@ class OolongSynthEnvironmentTests(unittest.TestCase):
         self.assertNotIn("Custom tools:", DEFAULT_SYNTH_ROOT_PROMPT)
         self.assertNotIn("Custom tools:", DEFAULT_SYNTH_CHILD_PROMPT)
         self.assertIn("Labels are", environment.context["dataset_intro"])
-        self.assertIn("submit_answer(...)` exactly once", environment.task)
+        self.assertIn("finish(\"...\")", environment.task)
+        self.assertNotIn("submit_answer", environment.task)
         self.assertIsNone(environment.delegated_task_prompt)
         delegated_task = (
             "Process chunk 2 and return concise mergeable text containing "
@@ -180,11 +188,174 @@ class OolongSynthEnvironmentTests(unittest.TestCase):
         root_user = build_initial_user(environment.task)
         child_user = build_initial_user(delegated_task, delegated=True)
         self.assertIn("Solve this Oolong-Synthetic benchmark task", root_user)
-        self.assertIn("submit_answer", root_user)
+        self.assertIn("finish", root_user)
+        self.assertNotIn("submit_answer", root_user)
         self.assertNotIn("Solve this Oolong-Synthetic benchmark task", child_user)
         self.assertNotIn("submit_answer", child_user)
         self.assertIn(delegated_task, child_user)
         self.assertIn("oolong_synth", available_environments())
+
+    def test_codeact_prompt_observation_and_capabilities_are_safe(self) -> None:
+        environment = OolongSynthEnvironment(samples=[sample_row()])
+        self.assertTrue(environment.use_recursive_codeact_harness)
+        self.assertEqual(
+            environment.environment_system_prompt,
+            DEFAULT_OOLONG_SYNTH_CODEACT_SYSTEM_PROMPT,
+        )
+        for phrase in (
+            "semantic meaning",
+            "every complete assigned record",
+            "65,536 characters",
+            "complete record",
+            "non-overlapping, disjoint chunks",
+            "self-contained task",
+            "actual chunk",
+            "mergeable child statistics",
+            "disjoint read-only chunks",
+            "Top-level await",
+            "exactly one executable block",
+            "`<python>...</python>` block",
+            "current Action Space",
+            "return_to_parent",
+            "finish(...)",
+        ):
+            self.assertIn(phrase, environment.environment_system_prompt)
+        self.assertNotIn("32_768", environment.environment_system_prompt)
+        self.assertNotIn("submit_answer", environment.environment_system_prompt)
+        self.assertNotIn(environment.sample.question, environment.environment_system_prompt)
+        self.assertNotIn(environment.sample.context_window_text, environment.environment_system_prompt)
+
+        observation = environment.observe()
+        self.assertNotIn("context_window_text", observation)
+        self.assertNotIn(environment.sample.context_window_text, str(observation))
+        self.assertNotIn("answer", observation)
+        self.assertNotIn("gold", observation)
+        self.assertFalse(observation["done"])
+
+        self.assertEqual(
+            set(environment.codeact_capabilities(is_root=True, depth=0)),
+            set(),
+        )
+        self.assertEqual(
+            set(environment.codeact_capabilities(is_root=False, depth=1)),
+            set(),
+        )
+        self.assertIn("submit_answer", environment.tools())
+        environment.close()
+
+    def test_codeact_finish_submits_once_and_normalizes_answer(self) -> None:
+        environment = OolongSynthEnvironment(samples=[sample_row()])
+        self.assertEqual(environment.finalize_root("  Answer: 3  "), "Answer: 3")
+        self.assertTrue(environment.status().done)
+        with self.assertRaisesRegex(RuntimeError, "already been submitted"):
+            environment.finalize_root("Answer: 3")
+        environment.close()
+
+    def test_codeact_runner_uses_explicit_private_chunks_and_root_finish(self) -> None:
+        source = (
+            "Labels are 'entity' and 'human being'.\n"
+            + "".join(
+                f"Date: Jan {day:02d}, 2024 || User: {day} || Instance: record-{day}\n"
+                for day in range(1, 4)
+            )
+        )
+        row = sample_row(answer="[3]")
+        row["context_window_text"] = source
+        row["context_len"] = len(source)
+        environment = OolongSynthEnvironment(samples=[row])
+        root_task = environment.task
+        root_source = environment.sample.context_window_text
+        captured_children: dict[str, tuple[str, str]] = {}
+        capture_lock = threading.Lock()
+        root_action_spaces: list[str] = []
+        child_action_spaces: list[str] = []
+
+        def handler(messages, _timeout):
+            initial_user = messages[1]["content"]
+            is_child = "Process chunk" in initial_user
+            action_space = initial_user.split("# Action Space\n", 1)[1]
+            if is_child:
+                task_line = initial_user.split("# Task\n", 1)[1].split("\n", 1)[0]
+                context_text = initial_user.split("# Context\n", 1)[1].split(
+                    "\n\n# Observation", 1
+                )[0]
+                chunk_id = ast.literal_eval(context_text)["chunk_id"]
+                with capture_lock:
+                    child_action_spaces.append(action_space)
+                    captured_children[chunk_id] = (task_line, context_text)
+                return (
+                    "<python>\n"
+                    "return_to_parent('processed assigned chunk')\n"
+                    "</python>"
+                )
+
+            root_action_spaces.append(action_space)
+            root_turn = len(root_action_spaces)
+            if root_turn == 1:
+                return (
+                    "<python>\n"
+                    "results = await spawn_subagents([\n"
+                    "    {'task': 'Process chunk A and return mergeable counts.', "
+                    "'context': {'chunk_id': 'A', 'context_window_text': 'chunk-A', "
+                    "'question': 'count records', 'dataset_intro': 'count all'}},\n"
+                    "    {'task': 'Process chunk B and return mergeable counts.', "
+                    "'context': {'chunk_id': 'B', 'context_window_text': 'chunk-B', "
+                    "'question': 'count records', 'dataset_intro': 'count all'}},\n"
+                    "])\n"
+                    "print(results)\n"
+                    "</python>"
+                )
+            return "<python>\nfinish('Answer: 3')\n</python>"
+
+        factory = FakeFactory(handler)
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "model.yaml"
+            config.write_text(
+                "model:\n"
+                "  type: api\n"
+                "  api:\n"
+                "    model: synthetic\n",
+                encoding="utf-8",
+            )
+            run = run_environment(
+                environment,
+                model_config=config,
+                agent_kwargs={
+                    "max_total_steps": 4,
+                    "max_depth": 1,
+                    "max_concurrent_subagents": 2,
+                    "client_factory": factory,
+                },
+            )
+
+        self.assertEqual(factory.created, 1)
+        self.assertEqual(factory.closed_clients, 1)
+        self.assertEqual(run.agent_result.status, "completed")
+        self.assertEqual(run.agent_result.answer, "Answer: 3")
+        self.assertEqual(run.environment_report["submitted_answer"], "Answer: 3")
+        self.assertEqual(run.environment_report["score"], 1.0)
+        self.assertEqual(len(run.agent_result.trace.children), 2)
+        with capture_lock:
+            child_records = tuple(captured_children.values())
+        self.assertEqual(set(captured_children), {"A", "B"})
+        self.assertEqual(len(child_records), 2)
+        self.assertEqual(
+            {
+                ast.literal_eval(context)["context_window_text"]
+                for _, context in child_records
+            },
+            {"chunk-A", "chunk-B"},
+        )
+        self.assertEqual(len({context for _, context in child_records}), 2)
+        self.assertNotIn(root_source, " ".join(context for _, context in child_records))
+        self.assertNotIn(root_task, " ".join(task for task, _ in child_records))
+        self.assertIn("finish", root_action_spaces[0])
+        self.assertNotIn("return_to_parent", root_action_spaces[0])
+        self.assertNotIn("submit_answer", root_action_spaces[0])
+        self.assertIn("return_to_parent", child_action_spaces[0])
+        self.assertNotIn("finish", child_action_spaces[0])
+        self.assertNotIn("submit_answer", child_action_spaces[0])
+        self.assertNotIn("gold", json.dumps(run.to_trace_dict()).lower())
 
     def test_prompt_chunking_example_is_executable_and_preserves_records(self) -> None:
         marker = "for chunk_id, chunk in enumerate(chunks):"

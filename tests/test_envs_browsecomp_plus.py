@@ -29,6 +29,10 @@ from recursive_agent.envs.browsecomp_plus.runner import (
     analyze_recursive_trace,
 )
 from recursive_agent.envs.browsecomp_plus.evaluator import main as evaluator_main
+from recursive_agent.envs.browsecomp_plus.prompts import (
+    DEFAULT_BROWSECOMP_AGENT_PROMPT,
+    DEFAULT_BROWSECOMP_TOOLS_PROMPT,
+)
 from recursive_agent.envs.browsecomp_plus.tools import _tool_result_payload
 from recursive_agent.repl import ReplSession
 from recursive_agent.types import ModelCallUsage, ModelResponse
@@ -53,6 +57,25 @@ class StubSearchClient:
 
 
 class BrowseCompPlusEnvironmentTests(unittest.TestCase):
+    def test_prompt_ports_deep_research_strategy_to_native_tools(self) -> None:
+        prompt = DEFAULT_BROWSECOMP_AGENT_PROMPT
+        tools_prompt = DEFAULT_BROWSECOMP_TOOLS_PROMPT
+        self.assertIn("RESEARCH STRATEGY:", prompt)
+        self.assertIn("DELEGATION STRATEGY:", prompt)
+        self.assertIn("spawn_subagent(task, context=None)", prompt)
+        self.assertIn("spawn_subagents(requests)", prompt)
+        self.assertIn('answer["ready"] = True', prompt)
+        self.assertIn("one executable `repl` block", prompt)
+        self.assertIn("`search(query: str) -> list[dict]`", tools_prompt)
+        self.assertIn("up to five results", tools_prompt)
+        self.assertNotIn("launch_subagent", prompt + tools_prompt)
+        self.assertNotIn("finish(...)", prompt + tools_prompt)
+        self.assertNotIn("<python>", prompt + tools_prompt)
+        self.assertNotIn(
+            "await",
+            (prompt + tools_prompt).lower().replace("do not use `await`", ""),
+        )
+
     def test_bm25_payload_normalizes_docids_and_empty_results(self) -> None:
         self.assertEqual(normalize_search_results([]), [])
         self.assertEqual(
@@ -99,6 +122,7 @@ class BrowseCompPlusEnvironmentTests(unittest.TestCase):
             environment.disabled_repl_builtins,
             frozenset({"__import__", "open"}),
         )
+        self.assertEqual(environment.max_repl_blocks_per_step, 1)
         serialized = json.dumps(environment.context)
         for forbidden in ("answer", "gold", "evidence", "qrel", "judge"):
             self.assertNotIn(forbidden, serialized.lower())
@@ -294,7 +318,7 @@ class BrowseCompPlusEnvironmentTests(unittest.TestCase):
         def handler(messages, timeout):
             task = initial_task(messages)
             if task == "root":
-                if "FINAL FORMAT OVERRIDE" in messages[-1]["content"]:
+                if "best supported answer" in messages[-1]["content"]:
                     return (
                         "Explanation: worker report collected [1]\n"
                         "Exact Answer: Example\nConfidence: 50%"
@@ -305,17 +329,12 @@ class BrowseCompPlusEnvironmentTests(unittest.TestCase):
                     "print(report)\n"
                     "```"
                 )
-            if "WORKER_REPORT" in messages[-1]["content"]:
+            if "evidence report for the parent" in messages[-1]["content"]:
                 return (
-                    "WORKER_REPORT\n"
-                    "Status: PARTIAL\n"
-                    "Objective: worker\n"
-                    "Candidates: Example\n"
+                    "Findings: Example\n"
                     "Evidence: evidence [1]\n"
-                    "Checks: one clue verified\n"
                     "Queries tried: one query\n"
-                    "Unresolved: one clue\n"
-                    "Recommended next action: verify the missing clue"
+                    "Unresolved: one clue"
                 )
             return "I am still investigating."
 
@@ -331,7 +350,7 @@ class BrowseCompPlusEnvironmentTests(unittest.TestCase):
         ).run("root")
 
         child = result.trace.children[0]
-        self.assertTrue(child.forced_final_response.startswith("WORKER_REPORT"))
+        self.assertTrue(child.forced_final_response.startswith("Findings:"))
         self.assertNotIn("Exact Answer:", child.forced_final_response)
         self.assertIn("Exact Answer: Example", result.answer)
 

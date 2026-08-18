@@ -5,7 +5,58 @@ from __future__ import annotations
 from .dataset import OolongSynthSample
 
 
-CHUNK_CHAR_LIMIT = 32 * 1024
+CHUNK_CHAR_LIMIT = 65_536
+LEGACY_CHUNK_CHAR_LIMIT = 32 * 1024
+
+
+DEFAULT_OOLONG_SYNTH_CODEACT_SYSTEM_PROMPT = """### Oolong-Synth
+
+You are an agent for long-context aggregation tasks. Solve the assigned
+question using only the records available in your private node context and the
+current Action Space.
+
+<TIPS>
+
+CONTEXT STRATEGY:
+
+* Classify records by semantic meaning according to the assigned instructions,
+  never by keyword shortcuts or guessed labels.
+* Process every complete assigned record needed for the result. Use Python for
+  counting, aggregation, bookkeeping, and combining intermediate results.
+* If the assigned source is at most 65,536 characters, process it directly.
+* If it is longer than 65,536 characters, split it at complete record
+  boundaries into ordered, non-overlapping, disjoint chunks. Never split a
+  record, duplicate a record, or silently drop one.
+
+DELEGATION STRATEGY:
+
+* Give each child a self-contained task describing the question, classification
+  rules, exact chunk scope, and mergeable statistics it must return.
+* Pass the actual chunk through the child's explicit context. A child receives
+  no root task or source automatically; do not assume it can see either.
+* Use concurrent children only for disjoint read-only chunks with no ordering or
+  resource conflicts. Use sequential delegation when work depends on prior
+  results.
+* Verify processed-record counts and combine mergeable child statistics before
+  producing the final answer.
+
+</TIPS>
+
+Use the persistent Python REPL and only capabilities listed in the current
+Action Space. Top-level await is supported; await delegated calls such as
+await spawn_subagent(...) or await spawn_subagents(...). Children return their
+mergeable result with return_to_parent(...). Only the root may call finish(...).
+
+At each model step, output exactly one executable block, specifically one
+`<python>...</python>` block:
+
+<python>
+...
+</python>
+
+Return no text outside that block and do not use capabilities absent from the
+current Action Space.
+""".strip()
 
 
 DEFAULT_OOLONG_SYNTH_PROMPT = r'''### Oolong-Synth
@@ -374,9 +425,9 @@ Question:
 
 The complete unlabeled dataset is available only in the private REPL variable
 `context["context_window_text"]`. Route by its actual character length first;
-split and spawn over-limit text before inspecting records.
-Call `submit_answer(...)` exactly once in the requested format as soon as the
-exact result is computed; do not continue inspecting records."""
+process short source directly or split over-limit source at complete record
+boundaries before delegating disjoint chunks. After merging the exact result,
+the root must call `finish("...")` once in the requested answer format."""
 
 
 def build_synth_task_prompt(
@@ -403,6 +454,8 @@ completion of the full sample."""
 
 __all__ = [
     "CHUNK_CHAR_LIMIT",
+    "LEGACY_CHUNK_CHAR_LIMIT",
+    "DEFAULT_OOLONG_SYNTH_CODEACT_SYSTEM_PROMPT",
     "DEFAULT_OOLONG_SYNTH_PROMPT",
     "DEFAULT_OOLONG_SYNTH_CHILD_EXAMPLE",
     "DEFAULT_OOLONG_SYNTH_ROOT_COMPLETION_PROMPT",

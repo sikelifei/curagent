@@ -36,6 +36,28 @@ SUPPORTED_BACKENDS = frozenset(
 
 
 @dataclass(frozen=True)
+class AgentLimits:
+    """Public limits shared by the recursive harness contract."""
+
+    max_total_steps: int = 20
+    max_depth: int = 4
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.max_total_steps, int)
+            or isinstance(self.max_total_steps, bool)
+            or self.max_total_steps <= 0
+        ):
+            raise ConfigurationError("max_total_steps must be a positive integer")
+        if (
+            not isinstance(self.max_depth, int)
+            or isinstance(self.max_depth, bool)
+            or self.max_depth < 0
+        ):
+            raise ConfigurationError("max_depth must be a non-negative integer")
+
+
+@dataclass(frozen=True)
 class AgentConfig:
     backend: str = "openai"
     backend_kwargs: dict[str, Any] = field(default_factory=dict)
@@ -77,6 +99,11 @@ class AgentConfig:
             raise ConfigurationError(
                 "max_observation_chars must be a positive integer or None"
             )
+
+    @property
+    def limits(self) -> AgentLimits:
+        """Return the forward-looking limits view of legacy config fields."""
+        return AgentLimits(max_total_steps=self.max_steps, max_depth=self.max_depth)
 
 
 def load_model_config(path: str | Path) -> tuple[str, dict[str, Any]]:

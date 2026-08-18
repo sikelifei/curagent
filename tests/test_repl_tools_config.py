@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import tempfile
 import unittest
 from pathlib import Path
@@ -7,7 +8,13 @@ from unittest.mock import patch
 
 from recursive_agent import ConfigurationError, RecursiveAgent, load_model_config
 from recursive_agent.clients import get_client
-from recursive_agent.repl import ReplSession, find_repl_blocks
+from recursive_agent.repl import NodeTermination, ReplSession, find_repl_blocks
+from recursive_agent.tools import (
+    CapabilityCollection,
+    format_tools_for_prompt,
+    parse_tools,
+    tool_values,
+)
 
 
 class ReplToolsConfigTests(unittest.TestCase):
@@ -46,6 +53,120 @@ class ReplToolsConfigTests(unittest.TestCase):
         self.assertTrue(result.answer_ready)
         self.assertEqual(result.answer_content, "ok")
         self.assertIn("context", result.trace.variables)
+
+    def test_capability_binding_replaces_stale_action_space_entries(self) -> None:
+        repl = ReplSession(
+            context=None,
+            capabilities=CapabilityCollection({"old_tool": lambda: "old"}),
+        )
+        self.assertEqual(repl.execute("old_tool()").trace.output, "'old'")
+
+        repl.bind_capabilities({"new_tool": lambda: "new"})
+        result = repl.execute("new_tool()")
+        self.assertEqual(result.trace.output, "'new'")
+        stale = repl.execute("old_tool()")
+        self.assertIn("NameError", stale.trace.error or "")
+
+    def test_legacy_parse_tools_preserves_environment_owned_names_only(self) -> None:
+        finish = object()
+        return_to_parent = object()
+        parsed = parse_tools(
+            {
+                "finish": {"tool": finish, "description": "finish the task"},
+                "return_to_parent": {
+                    "tool": return_to_parent,
+                    "description": "return the result",
+                },
+            }
+        )
+
+        self.assertIs(parsed["finish"].value, finish)
+        self.assertEqual(parsed["finish"].description, "finish the task")
+        self.assertIs(parsed["return_to_parent"].value, return_to_parent)
+        self.assertEqual(parsed["return_to_parent"].description, "return the result")
+        self.assertIs(tool_values(parsed)["finish"], finish)
+        self.assertIn("`finish`: finish the task", format_tools_for_prompt(parsed) or "")
+
+        for name in ("finish", "return_to_parent"):
+            with self.subTest(capability_name=name), self.assertRaises(ConfigurationError):
+                CapabilityCollection({name: object()})
+
+        for name in (
+            "spawn_subagent",
+            "spawn_subagents",
+            "context",
+            "answer",
+            "SHOW_VARS",
+        ):
+            with self.subTest(name=name), self.assertRaises(ConfigurationError):
+                parse_tools({name: object()})
+
+    def test_top_level_await_imports_and_persistent_values(self) -> None:
+        repl = ReplSession(context=None)
+        result = repl.execute(
+            "import asyncio\n"
+            "import math\n"
+            "value = await asyncio.sleep(0, result=math.sqrt(81))\n"
+            "value"
+        )
+        self.assertIsNone(result.trace.error)
+        self.assertEqual(result.trace.output, "9.0")
+        self.assertEqual(repl.execute("value + 1").trace.output, "10.0")
+
+    def test_top_level_await_works_when_sync_execute_runs_in_event_loop(self) -> None:
+        repl = ReplSession(context=None)
+
+        async def call_execute() -> object:
+            return repl.execute("import asyncio\nawait asyncio.sleep(0)\n42")
+
+        result = asyncio.run(call_execute())
+        self.assertEqual(result.trace.output, "42")  # type: ignore[union-attr]
+
+    def test_framework_termination_is_not_reported_as_python_error(self) -> None:
+        def finish(result: object = None) -> None:
+            raise NodeTermination("finish", result)
+
+        repl = ReplSession(capabilities={"finish": finish})
+        execution = repl.execute("print('before')\nfinish({'ok': True})\nprint('after')")
+        self.assertTrue(execution.terminated)
+        self.assertEqual(execution.termination_kind, "finish")
+        self.assertEqual(execution.termination_result, {"ok": True})
+        self.assertIsNone(execution.trace.error)
+        self.assertEqual(execution.trace.output, "before")
+
+    def test_framework_termination_bypasses_ordinary_exception_handlers(self) -> None:
+        def finish(result: object = None) -> None:
+            raise NodeTermination("finish", result)
+
+        repl = ReplSession(capabilities={"finish": finish})
+        execution = repl.execute(
+            "try:\n"
+            "    finish('done')\n"
+            "except Exception:\n"
+            "    print('caught')\n"
+            "print('after')"
+        )
+
+        self.assertTrue(issubclass(NodeTermination, BaseException))
+        self.assertFalse(issubclass(NodeTermination, Exception))
+        self.assertTrue(execution.terminated)
+        self.assertEqual(execution.termination_kind, "finish")
+        self.assertEqual(execution.termination_result, "done")
+        self.assertIsNone(execution.trace.error)
+        self.assertEqual(execution.trace.output, "")
+
+    def test_awaited_framework_termination_is_captured_by_repl_boundary(self) -> None:
+        async def finish(result: object = None) -> None:
+            raise NodeTermination("finish", result)
+
+        repl = ReplSession(capabilities={"finish": finish})
+        execution = repl.execute("await finish({'ok': True})\nprint('after')")
+
+        self.assertTrue(execution.terminated)
+        self.assertEqual(execution.termination_kind, "finish")
+        self.assertEqual(execution.termination_result, {"ok": True})
+        self.assertIsNone(execution.trace.error)
+        self.assertEqual(execution.trace.output, "")
 
     def test_invalid_tool_names_are_rejected(self) -> None:
         for tools in ({"answer": 1}, {"not-valid": 1}, {"class": 1}):

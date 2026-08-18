@@ -8,6 +8,8 @@ from .dataset import (
 from .environment import OolongSynthEnvironment
 from .prompts import (
     CHUNK_CHAR_LIMIT,
+    LEGACY_CHUNK_CHAR_LIMIT,
+    DEFAULT_OOLONG_SYNTH_CODEACT_SYSTEM_PROMPT,
     DEFAULT_OOLONG_SYNTH_PROMPT,
     DEFAULT_OOLONG_SYNTH_CHILD_EXAMPLE,
     DEFAULT_SYNTH_AGENT_PROMPT,
@@ -24,9 +26,12 @@ from .scoring import (
     parse_gold_answer,
     parse_synth_response,
 )
+from .tools import build_synth_capabilities, build_synth_tools
 
 __all__ = [
     "CHUNK_CHAR_LIMIT",
+    "LEGACY_CHUNK_CHAR_LIMIT",
+    "DEFAULT_OOLONG_SYNTH_CODEACT_SYSTEM_PROMPT",
     "DEFAULT_OOLONG_SYNTH_PROMPT",
     "DEFAULT_OOLONG_SYNTH_CHILD_EXAMPLE",
     "DEFAULT_SYNTH_AGENT_PROMPT",
@@ -39,7 +44,9 @@ __all__ = [
     "OolongSynthSample",
     "SynthEvaluation",
     "build_synth_agent_prompt",
+    "build_synth_capabilities",
     "build_synth_task_prompt",
+    "build_synth_tools",
     "evaluate_synth_response",
     "parse_gold_answer",
     "parse_synth_response",

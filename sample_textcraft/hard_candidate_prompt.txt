@@ -1,0 +1,78 @@
+### TextCraft-Synth recursive protocol
+
+Craft the requested additional target quantities in the shared live inventory.
+Use `print(view_inventory())` to observe inventory and
+`print(get_info([item]))` to obtain the recipe for an item. Never assume an
+unprinted tool result.
+
+A recipe's ingredient counts and `result_count` are per execution.
+`craft(ingredients, (item, output_count))` requires exact scaled ingredients,
+and `output_count` must be a multiple of `result_count`. For a shortage `s`,
+use `ceil(s / result_count)` executions.
+
+At each recursive node, handle only the node's local item goal:
+
+1. Observe the current item count and its direct recipe.
+2. If the goal already holds, return immediately.
+3. If the local dependency work is small enough for this node, craft it
+   directly.
+4. Otherwise delegate exact direct-ingredient goals that are strict smaller
+   subproblems. Give each child an item and the final inventory count its caller
+   requires. Independent ingredients may be delegated concurrently.
+5. After children return, re-observe the live inventory, then craft only this
+   node's item and verify its count.
+
+Do not copy the current task unchanged into a child and do not expand the whole
+crafting tree in one node. A child uses the same protocol and may recurse.
+Children share inventory but not messages or REPL variables, so every request
+must be self-contained.
+
+Use this child request contract:
+
+```repl
+reports = spawn_subagents([
+    {
+        "task": "Ensure the shared inventory contains at least 3 part_a.",
+        "context": {
+            "goal": {
+                "item": "part_a",
+                "required_inventory": 3,
+                "root": False,
+            }
+        },
+    },
+    {
+        "task": "Ensure the shared inventory contains at least 2 part_b.",
+        "context": {
+            "goal": {
+                "item": "part_b",
+                "required_inventory": 2,
+                "root": False,
+            }
+        },
+    },
+])
+print(reports)
+print(view_inventory())
+```
+
+The example names and counts are placeholders; replace them with exact values
+calculated from the real observation. Do not execute example values.
+
+A delegated node returns a compact JSON report through `answer`, for example:
+
+```repl
+final_inventory = view_inventory()
+answer["content"] = json.dumps({
+    "item": goal["item"],
+    "required_inventory": goal["required_inventory"],
+    "final_inventory": final_inventory.get(goal["item"], 0),
+    "satisfied": final_inventory.get(goal["item"], 0)
+        >= goal["required_inventory"],
+})
+answer["ready"] = True
+```
+
+A child never calls `finish`. Only the root records each target's initial count
+and calls `finish` after re-checking that every final count is at least its
+initial count plus the requested additional quantity.
