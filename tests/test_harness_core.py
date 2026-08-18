@@ -121,7 +121,79 @@ class _AsyncTerminalEnvironment(_Environment):
         return EnvironmentStatus(done=True, final_answer="terminal answer")
 
 
+class _RolePromptEnvironment(_Environment):
+    @property
+    def use_role_specific_prompts(self) -> bool:
+        return True
+
+    @property
+    def root_prompt(self) -> str:
+        return "Root-only system guidance."
+
+    @property
+    def child_prompt(self) -> str:
+        return "Child-only system guidance."
+
+
+class _LegacyRolePromptEnvironment(_Environment):
+    @property
+    def root_prompt(self) -> str:
+        return "Legacy root-only guidance."
+
+    @property
+    def child_prompt(self) -> str:
+        return "Legacy child-only guidance."
+
+
 class HarnessCoreTests(unittest.TestCase):
+    def test_root_and_child_use_role_specific_system_prompts(self) -> None:
+        scripts = {
+            "root": _python("result = spawn_subagent('child')\nfinish(result)"),
+            "child": _python("return_to_parent('done')"),
+        }
+        client = _Client(lambda messages: scripts[_task(messages)])
+        scheduler = RecursiveScheduler(
+            _RolePromptEnvironment(), client, max_total_steps=2, max_depth=1
+        )
+
+        scheduler.run("root")
+
+        self.assertEqual(client.calls[0][0]["content"], "Root-only system guidance.")
+        self.assertEqual(client.calls[1][0]["content"], "Child-only system guidance.")
+
+    def test_default_prompt_routing_keeps_environment_guidance_shared(self) -> None:
+        scripts = {
+            "root": _python("result = spawn_subagent('child')\nfinish(result)"),
+            "child": _python("return_to_parent('done')"),
+        }
+        client = _Client(lambda messages: scripts[_task(messages)])
+        scheduler = RecursiveScheduler(
+            _LegacyRolePromptEnvironment(), client, max_total_steps=2, max_depth=1
+        )
+
+        scheduler.run("root")
+
+        self.assertEqual(client.calls[0][0]["content"], "Environment-owned guidance.")
+        self.assertEqual(client.calls[1][0]["content"], "Environment-owned guidance.")
+
+    def test_spawn_subagent_runs_directly_and_legacy_await_remains_compatible(self) -> None:
+        scripts = {
+            "root": _python("child = spawn_subagent('child')\nfinish(child)"),
+            "child": _python("return_to_parent('prepared')"),
+        }
+        client = _Client(lambda messages: scripts[_task(messages)])
+        scheduler = RecursiveScheduler(_Environment(), client, max_total_steps=2, max_depth=1)
+
+        result = scheduler.run("root")
+
+        self.assertEqual(result.answer, "finalized:prepared")
+        assert scheduler.root is not None
+        description = scheduler.root.capabilities["spawn_subagent"].prompt_description
+        self.assertIsNotNone(description)
+        assert description is not None
+        self.assertIn("Call it directly", description)
+        self.assertNotIn("always write await", description)
+
     def test_async_observation_and_terminal_status_stop_without_generation(self) -> None:
         client = _Client(lambda messages: _python("finish('unexpected')"))
         scheduler = RecursiveScheduler(_AsyncTerminalEnvironment(), client, max_total_steps=2)
@@ -253,14 +325,14 @@ class HarnessCoreTests(unittest.TestCase):
         self.assertIn("not in keyword arguments", error)
         self.assertIn("spawn_subagent(task: str, context=None)", client.calls[1][-1]["content"])
 
-    def test_framework_spawn_descriptions_require_await(self) -> None:
+    def test_framework_spawn_descriptions_teach_direct_calls(self) -> None:
         client = _Client(lambda messages: _python("finish('done')"))
         scheduler = RecursiveScheduler(_Environment(), client, max_total_steps=1, max_depth=1)
         scheduler.run("root")
         prompt = client.calls[0][1]["content"]
-        self.assertIn("always write await spawn_subagent", prompt)
-        self.assertIn("call without await does not run the child", prompt)
-        self.assertIn("always write await spawn_subagents", prompt)
+        self.assertIn("Call it directly", prompt)
+        self.assertIn("use sequential spawn_subagent calls", prompt)
+        self.assertNotIn("always write await", prompt)
 
     def test_global_budget_and_ordered_concurrent_children(self) -> None:
         scripts = {

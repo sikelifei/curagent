@@ -42,18 +42,17 @@ Only call capabilities listed in the action space.
 
 _FRAMEWORK_DESCRIPTIONS = {
     "spawn_subagent": (
-        "spawn_subagent(task: str, context=None) -> str. Asynchronously run one "
+        "spawn_subagent(task: str, context=None) -> str. Run one "
         "delegated task sequentially and return its local result. Put objective, "
         "quantity, scope, restrictions, and return condition inside task. "
-        "This is async: always write await spawn_subagent(...); a call without "
-        "await does not run the child."
+        "Call it directly; do not add await merely to make the recursion decision."
     ),
     "spawn_subagents": (
-        "spawn_subagents(requests: list[dict]) -> list[str]. Asynchronously run "
+        "spawn_subagents(requests: list[dict]) -> list[str]. Run "
         "independent delegated tasks concurrently; results preserve request order. "
         "Put each request's objective, quantity, scope, restrictions, and return "
-        "condition inside its task string. This is async: always write await "
-        "spawn_subagents(...); a call without await does not run the children."
+        "condition inside its task string. Call it directly; use sequential "
+        "spawn_subagent calls when one branch depends on another."
     ),
     "finish": "Submit the root result and terminate the root agent.",
     "return_to_parent": "Return a local result to the direct parent and terminate this child.",
@@ -117,6 +116,26 @@ def _display_value(value: Any) -> str:
     if value is None:
         return "None"
     return str(value)
+
+
+class _AwaitableString(str):
+    """Keep legacy ``await spawn_subagent(...)`` calls source-compatible."""
+
+    def __await__(self):
+        async def resolve() -> str:
+            return str(self)
+
+        return resolve().__await__()
+
+
+class _AwaitableList(list[str]):
+    """Keep legacy ``await spawn_subagents(...)`` calls source-compatible."""
+
+    def __await__(self):
+        async def resolve() -> list[str]:
+            return list(self)
+
+        return resolve().__await__()
 
 
 def _fit_head_and_tail(value: str, limit: int) -> tuple[str, bool]:
@@ -479,8 +498,21 @@ class RecursiveScheduler:
             return None
         return max(0.0, self._deadline - time.monotonic())
 
-    def _system_prompt(self) -> str:
-        for name in ("environment_system_prompt", "system_prompt"):
+    def _system_prompt(self, *, is_root: bool = True) -> str:
+        role_prompt = "root_prompt" if is_root else "child_prompt"
+        use_role_specific_prompts = getattr(
+            self.environment,
+            "use_role_specific_prompts",
+            False,
+        )
+        if callable(use_role_specific_prompts):
+            use_role_specific_prompts = use_role_specific_prompts()
+        prompt_names = (
+            (role_prompt, "environment_system_prompt", "system_prompt")
+            if use_role_specific_prompts
+            else ("environment_system_prompt", "system_prompt")
+        )
+        for name in prompt_names:
             try:
                 value = getattr(self.environment, name)
             except AttributeError:
@@ -831,7 +863,7 @@ class AgentNode:
         self._spawn_lock = threading.Lock()
         self._direct_spawned = 0
         self._last_response: str | None = None
-        self._system_prompt = scheduler._system_prompt()
+        self._system_prompt = scheduler._system_prompt(is_root=self.is_root)
         self.trace.system_prompt = self._system_prompt
         self.capabilities = scheduler._capabilities_for(self)
         self.repl = ReplSession(
@@ -867,13 +899,13 @@ class AgentNode:
             self._direct_spawned += allowed
             return allowed
 
-    async def spawn_subagent(self, task: str, context: Any = None) -> str:
-        """Run one child sequentially; exposed as an async REPL capability."""
-        return self.scheduler._spawn_one(self, task, context)
+    def spawn_subagent(self, task: str, context: Any = None) -> str:
+        """Run one child sequentially and return its local result."""
+        return _AwaitableString(self.scheduler._spawn_one(self, task, context))
 
-    async def spawn_subagents(self, requests: list[dict[str, Any]]) -> list[str]:
+    def spawn_subagents(self, requests: list[dict[str, Any]]) -> list[str]:
         """Run independent children concurrently and preserve request order."""
-        return self.scheduler._spawn_many(self, requests)
+        return _AwaitableList(self.scheduler._spawn_many(self, requests))
 
     def finish(self, result: Any = None) -> None:
         if not self.is_root:

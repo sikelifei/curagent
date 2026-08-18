@@ -33,6 +33,11 @@ class AgentEnvironment(ABC):
         """Opt into the generic recursive CodeAct scheduler incrementally."""
         return False
 
+    @property
+    def use_role_specific_prompts(self) -> bool:
+        """Opt into distinct root and delegated CodeAct system prompts."""
+        return False
+
     def capabilities(self) -> CapabilityCollection:
         """Return validated environment capabilities.
 

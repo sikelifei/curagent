@@ -103,6 +103,10 @@ class TextCraftSynthEnvironment(AgentEnvironment):
         return True
 
     @property
+    def use_role_specific_prompts(self) -> bool:
+        return True
+
+    @property
     def environment_system_prompt(self) -> str:
         """Return the environment-owned prompt used by every scheduler node."""
         return self._agent_prompt
@@ -196,9 +200,9 @@ class TextCraftSynthEnvironment(AgentEnvironment):
         with self._lock:
             return dict(sorted(self._inventory.items()))
 
-    def get_info(self, items: list[str] | None = None) -> list[dict[str, Any]]:
+    def get_info(self, items: list[str] | None = None) -> list[dict[str, Any]] | str:
         if items is None:
-            items = list(self.sample.targets)
+            return 'Error: get_info requires explicit item names. Example: get_info(["m4_i1"])'
         if not isinstance(items, list):
             raise TypeError("get_info expects a list of item names")
         with self._lock:
@@ -207,10 +211,10 @@ class TextCraftSynthEnvironment(AgentEnvironment):
     def craft(self, ingredients: dict[str, int], target: tuple[str, int]) -> str:
         try:
             return self._craft(ingredients, target)
-        except Exception as exc:
+        except (TypeError, ValueError) as exc:
             with self._lock:
                 self._errors.append(f"{type(exc).__name__}: {exc}")
-            raise
+            return f"Error: {exc}"
 
     def _craft(self, ingredients: dict[str, int], target: tuple[str, int]) -> str:
         item, output_count = _parse_target(target)
@@ -237,7 +241,7 @@ class TextCraftSynthEnvironment(AgentEnvironment):
             if selected is None:
                 raise ValueError(
                     f"Ingredients do not match a recipe for {item!r}; "
-                    "use get_info() and provide exact scaled counts"
+                    "use get_info([item_name]) and provide exact scaled counts"
                 )
             for ingredient, count in supplied.items():
                 if self._inventory.get(ingredient, 0) < count:

@@ -25,13 +25,19 @@ def analyze_textcraft_result(row: dict[str, Any]) -> dict[str, Any]:
     child_finish_calls = 0
     unchanged_child_tasks = 0
     contracted_child_tasks = 0
+    repeated_action_count = 0
+    repeated_observation_count = 0
+    no_progress_streak = 0
 
     for index, agent in enumerate(agents):
         per_agent_queries: Counter[str] = Counter()
+        action_sequence: list[str] = []
+        observation_sequence: list[str] = []
         for step in agent.get("steps") or []:
             if step.get("observation_truncated"):
                 observation_truncations += 1
             for execution in step.get("code_executions") or []:
+                action_sequence.append(_normalize_action(execution.get("code")))
                 if execution.get("error"):
                     execution_errors += 1
                 try:
@@ -55,8 +61,18 @@ def analyze_textcraft_result(row: dict[str, Any]) -> dict[str, Any]:
                             get_info_no_arg_calls += 1
                 if execution_craft_calls > 1:
                     multi_craft_executions += 1
+            observation_sequence.append(
+                _normalize_action(step.get("model_observation"))
+            )
         duplicate_get_info_queries += sum(
             max(0, count - 1) for count in per_agent_queries.values()
+        )
+        repeated_action_count += _consecutive_repetition_count(action_sequence)
+        repeated_observation_count += _consecutive_repetition_count(observation_sequence)
+        no_progress_streak = max(
+            no_progress_streak,
+            _longest_identical_streak(action_sequence),
+            _longest_identical_streak(observation_sequence),
         )
 
     for child in agents[1:]:
@@ -71,6 +87,15 @@ def analyze_textcraft_result(row: dict[str, Any]) -> dict[str, Any]:
     crafting_depth = int(row.get("crafting_depth") or report.get("crafting_depth") or 0)
     child_count = max(0, len(agents) - 1)
     max_depth = max((int(agent.get("depth", 0)) for agent in agents), default=0)
+    children = agents[1:]
+    completed_children = sum(agent.get("status") == "completed" for agent in children)
+    budget_exhausted_children = sum(
+        agent.get("status") == "budget_exhausted" for agent in children
+    )
+    failed_children = sum(
+        agent.get("status") not in {"completed", "budget_exhausted"}
+        for agent in children
+    )
     recursion_issues = _recursion_issues(
         crafting_depth=crafting_depth,
         child_count=child_count,
@@ -106,12 +131,18 @@ def analyze_textcraft_result(row: dict[str, Any]) -> dict[str, Any]:
         "max_trace_depth": max_depth,
         "root_steps": len((root or {}).get("steps") or []),
         "total_agent_steps": sum(len(agent.get("steps") or []) for agent in agents),
+        "child_steps": sum(len(agent.get("steps") or []) for agent in children),
         "spawn_subagent_calls": total_calls["spawn_subagent"],
         "spawn_subagents_calls": total_calls["spawn_subagents"],
         "root_finish_calls": total_calls["finish"] - child_finish_calls,
+        "return_to_parent_calls": total_calls["return_to_parent"],
+        "children_completed": completed_children,
+        "children_budget_exhausted": budget_exhausted_children,
+        "children_failed": failed_children,
         "child_finish_calls": child_finish_calls,
         "child_tasks_with_absolute_contract": contracted_child_tasks,
         "unchanged_child_tasks": unchanged_child_tasks,
+        "same_task_child_edges": unchanged_child_tasks,
         "get_info_calls": total_calls["get_info"],
         "get_info_no_arg_calls": get_info_no_arg_calls,
         "duplicate_get_info_queries": duplicate_get_info_queries,
@@ -122,6 +153,13 @@ def analyze_textcraft_result(row: dict[str, Any]) -> dict[str, Any]:
         "tool_errors": len(report.get("tool_errors") or []),
         "execution_errors": execution_errors,
         "observation_truncations": observation_truncations,
+        "repeated_action_count": repeated_action_count,
+        "repeated_observation_count": repeated_observation_count,
+        "no_progress_streak": no_progress_streak,
+        "no_progress_repetitions": repeated_action_count + repeated_observation_count,
+        "termination_reason": (root or {}).get("status"),
+        "finish_attempts": int(report.get("finish_attempts", 0) or 0),
+        "final_missing_targets": report.get("missing") or {},
         "recursion_reasonable": bool(agents) and not recursion_issues,
         "recursion_issues": recursion_issues,
         "trajectory_reasonable": bool(agents) and not trajectory_issues,
@@ -201,6 +239,33 @@ def _normalize_task(value: Any) -> str:
     return " ".join(str(value or "").split()).lower()
 
 
+def _normalize_action(value: Any) -> str:
+    return " ".join(str(value or "").split())
+
+
+def _consecutive_repetition_count(values: list[str]) -> int:
+    return sum(
+        bool(current) and current == previous
+        for previous, current in zip(values, values[1:])
+    )
+
+
+def _longest_identical_streak(values: list[str]) -> int:
+    longest = 0
+    current = 0
+    previous: str | None = None
+    for value in values:
+        if not value:
+            current = 0
+        elif value == previous:
+            current += 1
+        else:
+            current = 1
+        longest = max(longest, current)
+        previous = value
+    return longest
+
+
 def _has_absolute_inventory_contract(task: str) -> bool:
     return (
         "shared inventory contains at least" in task
@@ -222,8 +287,6 @@ def _recursion_issues(
     issues: list[str] = []
     if crafting_depth and crafting_depth <= 3 and child_count:
         issues.append("needless_recursion_for_shallow_task")
-    if crafting_depth >= 4 and child_count == 0:
-        issues.append("missing_recursion_for_deep_task")
     if crafting_depth and max_depth >= crafting_depth:
         issues.append("recursion_did_not_reduce_depth")
     if parallel_spawn_calls:

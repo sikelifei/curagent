@@ -8,16 +8,28 @@ from recursive_agent.envs.textcraft_synth.trace_analysis import (
 )
 
 
-def _agent(*, agent_id: str, parent_id=None, depth=0, task="root", code="", children=None):
+def _agent(
+    *,
+    agent_id: str,
+    parent_id=None,
+    depth=0,
+    task="root",
+    code="",
+    children=None,
+    status="completed",
+    observation="state",
+):
     return {
         "agent_id": agent_id,
         "parent_id": parent_id,
         "depth": depth,
         "task": task,
+        "status": status,
         "steps": [
             {
                 "number": 1,
                 "observation_truncated": False,
+                "model_observation": observation,
                 "code_executions": [
                     {"code": code, "error": None, "variables": []}
                 ],
@@ -50,7 +62,7 @@ class TextCraftTraceAnalysisTests(unittest.TestCase):
             parent_id="root",
             depth=1,
             task="Ensure the shared inventory contains at least 2 x part.",
-            code="answer['ready'] = True",
+            code="return_to_parent('part ready')",
         )
         root = _agent(
             agent_id="root",
@@ -67,6 +79,10 @@ class TextCraftTraceAnalysisTests(unittest.TestCase):
         self.assertEqual(metrics["child_agent_count"], 1)
         self.assertEqual(metrics["spawn_subagents_calls"], 0)
         self.assertEqual(metrics["child_finish_calls"], 0)
+        self.assertEqual(metrics["return_to_parent_calls"], 1)
+        self.assertEqual(metrics["children_completed"], 1)
+        self.assertEqual(metrics["children_budget_exhausted"], 0)
+        self.assertEqual(metrics["children_failed"], 0)
 
     def test_flags_repetition_parallelism_and_child_finish(self) -> None:
         child = _agent(
@@ -97,6 +113,16 @@ class TextCraftTraceAnalysisTests(unittest.TestCase):
         self.assertIn(
             "multiple_crafts_in_one_execution", metrics["trajectory_issues"]
         )
+
+    def test_repeated_action_and_observation_diagnostics(self) -> None:
+        root = _agent(agent_id="root", code="get_info(['target'])")
+        root["steps"] = [root["steps"][0], dict(root["steps"][0])]
+        metrics = analyze_textcraft_result(_row(root, success=False))
+
+        self.assertEqual(metrics["repeated_action_count"], 1)
+        self.assertEqual(metrics["repeated_observation_count"], 1)
+        self.assertEqual(metrics["no_progress_streak"], 2)
+        self.assertEqual(metrics["no_progress_repetitions"], 2)
 
     def test_shallow_direct_solution_and_aggregation(self) -> None:
         root = _agent(
