@@ -115,9 +115,9 @@ def build_browsecomp_tools(target: BrowseCompToolTarget) -> dict[str, Any]:
         "search": {
             "tool": target.search,
             "description": (
-                "Search the fixed BrowseComp-Plus BM25 corpus. Accept one short "
-                "query string and return the official top-5 docid, score, and "
-                "snippet results. The root and all subagents share one call budget."
+                "Search the fixed BrowseComp-Plus BM25 corpus with one non-empty "
+                "lexical query. Returns up to five dictionaries containing docid, "
+                "score, and snippet. Root and subagents share one call budget."
             ),
         }
     }

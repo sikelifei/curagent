@@ -11,62 +11,46 @@ You are an agent in a crafting game. Craft the requested additional items from
 the shared inventory. You may need to craft intermediate ingredients first.
 
 If a target item already exists in the inventory, craft the requested quantity
-on top of the existing count.
+on top of what is already there.
 
+<TIPS>
 CRAFTING STRATEGY:
-
-- Recipes produce fixed quantities per execution.
-- Craft outputs only in valid multiples of `result_count`.
-- Scale every ingredient by the number of recipe executions.
-- Always verify what you have before claiming something cannot be crafted.
-- Check the inventory and recipe information before crafting.
-- Reuse existing intermediate items when possible.
-- Only use item names returned by the task, inventory, or `get_info()`.
+- Recipes produce fixed quantities per execution; outputs must be valid
+  multiples of `result_count`.
+- Recipe ingredients scale with the number of executions. The `craft` target is
+  `(item, total_output_count)`, not the execution count.
+- Check inventory and recipe information before crafting and use exact counts.
+- Always verify what you have before claiming something is impossible.
 
 DELEGATION STRATEGY:
+- Delegate independent intermediate ingredients for complex tasks.
+- Use `spawn_subagent` for one subtask or `spawn_subagents` for independent
+  subtasks. These calls are synchronous; do not use `await`.
+- Give each child one exact item and additional quantity. Children share the
+  live inventory and should return after their assignment is complete.
+- Reserve enough work for the root agent to assemble the final target.
+</TIPS>
 
-- It is highly recommended to delegate crafting of intermediate ingredients.
-- Break complex tasks into smaller, independent subtasks.
-- For sufficiently complex tasks, recursively delegate; subagents may further
-  delegate smaller subtasks.
-- Delegate one group of related items at a time, not the whole task at once.
-- Independent intermediate items may be delegated in parallel.
-- Use `spawn_subagent` for one subtask and `spawn_subagents` for independent
-  subtasks.
-- Delegated agents share the live inventory, so crafted items are immediately
-  available to the parent and other agents.
-- Reserve enough work for the current agent to perform the final assembly after
-  delegated subtasks complete.
-- After delegated work returns, check the live inventory before continuing.
-- A delegated task should be smaller than its parent and specify the exact
-  intermediate item and additional quantity to craft.
-- Do not delegate an unchanged copy of the parent task.
-
-A good delegated task is:
-
-Craft N additional ITEM in the shared inventory. Inspect the inventory and
-recipes, craft required intermediates or recursively delegate them when useful,
-verify the requested increase, and return immediately.
-
-Use one executable `repl` block per response and perform the next useful action.
+Use one executable Python code block per response and perform the next useful
+action.
+The root agent should call `finish(message)` only after checking the inventory.
 """
 
 
 DEFAULT_TEXTCRAFT_SUBAGENT_PROMPT = """### TextCraft-Synth guidance:
 
 Craft only the supplied additional item/count assignment from the shared
-inventory.
+inventory. You may need to craft intermediate ingredients first.
 
-You may need to craft intermediate ingredients first. For complex assignments,
-delegate intermediate crafting to smaller subagents when useful, and recursively
-delegate when appropriate.
+Recipes produce fixed quantities per execution; scale ingredients correctly and
+pass the total output count in `craft((item, total_output_count))`. Check
+inventory and recipe information before acting, and verify the requested
+increase before returning.
 
-Recipes produce fixed quantities per execution. Scale ingredients correctly,
-reuse existing inventory when possible, and verify the requested increase before
-returning.
-
-Do not continue working on the parent's final target after your assigned item is
-ready. Return immediately after completing and verifying your assignment.
+Use one executable Python code block per response. Do not call `finish` in a child
+agent, do not work on the parent's final target, and return after the assigned
+item is complete. You may recursively delegate smaller intermediate tasks when
+useful, without `await`.
 """
 
 
@@ -111,7 +95,7 @@ tools, do not call `finish`, and do not claim completion of the overall task.
 
 DEFAULT_TEXTCRAFT_TOOLS_PROMPT = """### Available tools
 
-Call tools from Python inside one `repl` block. The root and child prompts use
+Call tools from Python inside one Python code block. The root and child prompts use
 this same tool reference. Calls are synchronous; do not use `await`.
 
 1. `craft(ingredients: dict, target: tuple[str, int]) -> str`
@@ -144,7 +128,7 @@ this same tool reference. Calls are synchronous; do not use `await`.
    and optional `context`. All agents share the live crafting inventory.
 
 REPL variables persist for the current agent. Return exactly one executable
-`repl` block per model step and no text outside it."""
+Python code block per model step and no text outside it."""
 
 
 DEFAULT_TEXTCRAFT_ROOT_PROMPT = "\n\n".join(

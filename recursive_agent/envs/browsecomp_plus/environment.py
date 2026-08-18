@@ -100,6 +100,10 @@ class BrowseCompPlusEnvironment(AgentEnvironment):
         return DEFAULT_BROWSECOMP_WORKER_FORCED_FINAL_PROMPT
 
     @property
+    def max_repl_blocks_per_step(self) -> int:
+        return 1
+
+    @property
     def disabled_repl_builtins(self) -> frozenset[str]:
         # The search tool is the only benchmark data access path for this env.
         return frozenset({"__import__", "open"})

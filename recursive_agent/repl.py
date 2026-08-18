@@ -259,15 +259,15 @@ class ReplSession:
 def find_repl_blocks(text: str) -> list[str]:
     """Extract fenced/XML REPL blocks in source order.
 
-    ``repl`` is the documented label. ``python`` is accepted as a compatibility
-    alias because OpenAI-compatible models commonly emit that label for code
-    that is still intended for the persistent REPL.
+    ``repl`` is the documented label. ``python`` and ``py`` are accepted as
+    compatibility aliases because OpenAI-compatible models commonly emit those
+    labels for code that is still intended for the persistent REPL.
     """
     import re
 
     pattern = re.compile(
-        r"```(?:repl|python)[ \t]*\r?\n(.*?)(?:\r?\n)?```"
-        r"|<(?:repl|python)[ \t]*>(.*?)</(?:repl|python)[ \t]*>",
+        r"```(?:repl|python|py)[ \t]*\r?\n(.*?)(?:\r?\n)?```"
+        r"|<(?:repl|python|py)[ \t]*>(.*?)</(?:repl|python|py)[ \t]*>",
         re.DOTALL | re.IGNORECASE,
     )
     blocks = []
