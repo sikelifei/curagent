@@ -228,6 +228,40 @@ class HarnessCoreTests(unittest.TestCase):
         self.assertNotIn("`spawn_subagent`", grand_prompt)
         self.assertNotIn("`spawn_subagents`", grand_prompt)
 
+    def test_invalid_spawn_keywords_report_generic_contract(self) -> None:
+        responses = iter(
+            [
+                _python(
+                    "spawn_subagent(objective='craft ore', "
+                    "return_condition='done')"
+                ),
+                _python("finish('recovered')"),
+            ]
+        )
+        client = _Client(lambda messages: next(responses))
+        scheduler = RecursiveScheduler(_Environment(), client, max_total_steps=2, max_depth=1)
+
+        result = scheduler.run("root")
+
+        self.assertEqual(result.answer, "finalized:recovered")
+        root = scheduler.root
+        assert root is not None
+        error = root.trace.steps[0].code_executions[0].error
+        assert error is not None
+        self.assertIn("spawn_subagent(task: str, context=None)", error)
+        self.assertIn("objective, quantity, scope, restrictions, and return condition", error)
+        self.assertIn("not in keyword arguments", error)
+        self.assertIn("spawn_subagent(task: str, context=None)", client.calls[1][-1]["content"])
+
+    def test_framework_spawn_descriptions_require_await(self) -> None:
+        client = _Client(lambda messages: _python("finish('done')"))
+        scheduler = RecursiveScheduler(_Environment(), client, max_total_steps=1, max_depth=1)
+        scheduler.run("root")
+        prompt = client.calls[0][1]["content"]
+        self.assertIn("always write await spawn_subagent", prompt)
+        self.assertIn("call without await does not run the child", prompt)
+        self.assertIn("always write await spawn_subagents", prompt)
+
     def test_global_budget_and_ordered_concurrent_children(self) -> None:
         scripts = {
             "root": _python(

@@ -10,6 +10,8 @@ from recursive_agent.envs import available_environments
 from recursive_agent.envs.runner import run_environment
 from recursive_agent.envs.textcraft_synth import (
     DEFAULT_TEXTCRAFT_AGENT_PROMPT,
+    DEFAULT_TEXTCRAFT_CHILD_PROMPT,
+    DEFAULT_TEXTCRAFT_ROOT_PROMPT,
     TextCraftDataset,
     TextCraftSynthEnvironment,
     evaluate_inventory,
@@ -190,16 +192,19 @@ class TextCraftSynthEnvironmentTests(unittest.TestCase):
             "additional",
             "inventory and recipe",
             "Reuse existing",
-            "Verify quantities",
+            "Calculate carefully: if a recipe uses 2 ingredients to make 2 items",
             "same shared crafting environment and inventory",
             "immediately visible",
             "resource conflicts",
             "run them sequentially",
             "re-observe",
             "persistent Python REPL",
-            "exactly one executable `<python>...</python>` block",
-            "await spawn_subagent(...)",
-            "await spawn_subagents(...)",
+            "output exactly one executable\n`<python>...</python>` block",
+            "spawn_subagent(task: str, context=None)",
+            "spawn_subagents(requests: list[dict])",
+            "objective, quantity, scope,",
+            "inside the `task` string",
+            "* CORRECT: `await spawn_subagent",
             "current\nAction Space",
         ):
             self.assertIn(phrase, prompt)
@@ -222,6 +227,47 @@ class TextCraftSynthEnvironmentTests(unittest.TestCase):
             agent_prompt="Custom TextCraft system guidance.",
         )
         self.assertEqual(custom.environment_system_prompt, "Custom TextCraft system guidance.")
+
+    def test_textcraft_prompts_match_depth_aware_crafting_structure(self) -> None:
+        prompt = DEFAULT_TEXTCRAFT_AGENT_PROMPT
+        for phrase in (
+            "You are an agent in a crafting game.",
+            "Your goal is to craft items by combining ingredients.",
+            "which are sufficient to",
+            "Note: If you already have one of the target items",
+            "CRAFTING STRATEGY:",
+            "Recipes produce fixed quantities per execution",
+            "Recipe ingredients scale with the number of times you execute it",
+            "Always verify what you have before claiming something is impossible",
+            "DELEGATION STRATEGY:",
+            "It is **highly recommended** to delegate crafting of intermediate ingredients",
+            "Break complex tasks into INDEPENDENT subtasks that can be solved separately",
+            "recursively delegate",
+            "Items can be delegated in parallel if they do not depend on each other",
+            "After delegated work returns",
+            "objective, quantity, scope, restrictions, and return condition",
+            "spawn_subagent(task: str, context=None)",
+            "spawn_subagents(requests: list[dict])",
+            "* CORRECT: `await spawn_subagent(\"Craft 2x ingot",
+        ):
+            self.assertIn(phrase, prompt)
+
+        self.assertEqual(
+            prompt.count("* CORRECT: `await spawn_subagent("),
+            1,
+        )
+        self.assertNotIn("launch_subagent", prompt)
+        self.assertNotIn("Budget heuristic", prompt)
+        self.assertNotIn("<thought>", prompt)
+
+        child_prompt = DEFAULT_TEXTCRAFT_CHILD_PROMPT
+        self.assertIn("CRAFTING STRATEGY:", child_prompt)
+        self.assertIn("DELEGATION STRATEGY:", child_prompt)
+        self.assertIn("spawn_subagent(task: str, context=None)", child_prompt)
+        self.assertIn("spawn_subagents(requests: list[dict])", child_prompt)
+        self.assertNotIn("<thought>", child_prompt)
+        self.assertNotIn("`finish(message: str) -> str`", child_prompt)
+        self.assertIn("`finish(message: str) -> str`", DEFAULT_TEXTCRAFT_ROOT_PROMPT)
 
     def test_generated_tasks_have_the_paper_depth_bands(self) -> None:
         rows = generate_textcraft_samples(count=3, difficulty="hard", seed=4)
@@ -291,7 +337,7 @@ class TextCraftSynthEnvironmentTests(unittest.TestCase):
         self.assertNotIn('answer["ready"]', root_messages[0]["content"])
         self.assertIn('answer["ready"]', child_messages[0]["content"])
         self.assertIn("`finish(message: str) -> str`", root_messages[0]["content"])
-        self.assertIn("`finish(message: str) -> str`", child_messages[0]["content"])
+        self.assertNotIn("`finish(message: str) -> str`", child_messages[0]["content"])
         self.assertNotIn("Custom tools:", root_messages[0]["content"])
         self.assertNotIn("Custom tools:", child_messages[0]["content"])
         self.assertIn(environment.task, root_messages[1]["content"])

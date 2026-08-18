@@ -42,10 +42,18 @@ Only call capabilities listed in the action space.
 
 _FRAMEWORK_DESCRIPTIONS = {
     "spawn_subagent": (
-        "Asynchronously run one delegated task sequentially and return its local result."
+        "spawn_subagent(task: str, context=None) -> str. Asynchronously run one "
+        "delegated task sequentially and return its local result. Put objective, "
+        "quantity, scope, restrictions, and return condition inside task. "
+        "This is async: always write await spawn_subagent(...); a call without "
+        "await does not run the child."
     ),
     "spawn_subagents": (
-        "Asynchronously run independent delegated tasks concurrently; results preserve request order."
+        "spawn_subagents(requests: list[dict]) -> list[str]. Asynchronously run "
+        "independent delegated tasks concurrently; results preserve request order. "
+        "Put each request's objective, quantity, scope, restrictions, and return "
+        "condition inside its task string. This is async: always write await "
+        "spawn_subagents(...); a call without await does not run the children."
     ),
     "finish": "Submit the root result and terminate the root agent.",
     "return_to_parent": "Return a local result to the direct parent and terminate this child.",
@@ -539,14 +547,36 @@ class RecursiveScheduler:
         environment_capabilities = self._environment_capabilities(node)
         framework: dict[str, ToolInfo] = {}
         if node.depth < self.max_depth:
+            def spawn_subagent_capability(*args: Any, **kwargs: Any) -> Any:
+                unsupported = sorted(set(kwargs) - {"task", "context"})
+                if unsupported:
+                    raise TypeError(
+                        "spawn_subagent() valid signature is "
+                        "spawn_subagent(task: str, context=None); put objective, "
+                        "quantity, scope, restrictions, and return condition "
+                        "inside task, not in keyword arguments"
+                    )
+                return node.spawn_subagent(*args, **kwargs)
+
+            def spawn_subagents_capability(*args: Any, **kwargs: Any) -> Any:
+                unsupported = sorted(set(kwargs) - {"requests"})
+                if unsupported:
+                    raise TypeError(
+                        "spawn_subagents() valid signature is "
+                        "spawn_subagents(requests: list[dict]); put objective, "
+                        "quantity, scope, restrictions, and return condition "
+                        "inside each request's task string, not in keyword arguments"
+                    )
+                return node.spawn_subagents(*args, **kwargs)
+
             framework["spawn_subagent"] = ToolInfo(
                 "spawn_subagent",
-                node.spawn_subagent,
+                spawn_subagent_capability,
                 _FRAMEWORK_DESCRIPTIONS["spawn_subagent"],
             )
             framework["spawn_subagents"] = ToolInfo(
                 "spawn_subagents",
-                node.spawn_subagents,
+                spawn_subagents_capability,
                 _FRAMEWORK_DESCRIPTIONS["spawn_subagents"],
             )
         if node.is_root:
