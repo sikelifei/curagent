@@ -25,6 +25,7 @@ from recursive_agent.envs.oolong_synth import (
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="configs/model_api.local.yaml")
+    parser.add_argument("--model-name", default=None)
     parser.add_argument("--dataset-name", default="oolongbench/oolong-synth")
     parser.add_argument("--split", default="validation")
     parser.add_argument("--data-path", default=None)
@@ -129,6 +130,15 @@ def main() -> None:
 def _run_one(args: argparse.Namespace, position: int, row: dict[str, Any]) -> dict[str, Any]:
     started = time.time()
     try:
+        model_overrides = {
+            "timeout": args.request_timeout,
+            "sampling_args": {
+                "temperature": args.temperature,
+                "max_tokens": args.max_tokens,
+            },
+        }
+        if args.model_name:
+            model_overrides["model_name"] = args.model_name
         run = run_registered_environment(
             "oolong_synth",
             model_config=args.config,

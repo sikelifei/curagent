@@ -15,6 +15,7 @@ from recursive_agent.envs import run_registered_environment
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", default="configs/model_api.local.yaml")
+    parser.add_argument("--model-name", default=None)
     parser.add_argument("--data-path")
     parser.add_argument("--textcraft-root")
     parser.add_argument("--split", default="test")

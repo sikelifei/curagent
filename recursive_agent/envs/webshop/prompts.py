@@ -133,10 +133,10 @@ should be used only when it adds useful work."""
 
 DEFAULT_WEBSHOP_FORCED_FINAL_PROMPT = """No working steps remain. Return a concise plain-text status for this WebShop
 shopping episode. State whether the requested item was successfully purchased.
-The actual purchase action in this environment is `act("click[Buy Now]")`;
-`buy[...]` and `[FINISH]` are invalid actions. Do not claim success unless the
-environment reached the terminal Buy Now state. Do not use tools, subagents, or
-the BrowseComp answer format."""
+The actual purchase action is act(\"click[Buy Now]\"); buy[...] and [FINISH] are
+invalid actions. Do not claim success unless the environment reached the
+terminal Buy Now state. Do not use tools, subagents, or the BrowseComp answer
+format."""
 
 DEFAULT_WEBSHOP_SUBAGENT_FORCED_FINAL_PROMPT = """No working steps remain.
 Return a concise plain-text report for the assigned WebShop analysis. Do not
