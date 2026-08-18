@@ -1,0 +1,13 @@
+planner:
+  type: vllm_http
+  vllm_http:
+    base_url: http://127.0.0.1:56789/v1
+    model: qwen3-4b
+    api_key: EMPTY
+    temperature: 0.0
+    max_tokens: 512
+    timeout: 120
+    native_tools: true
+    tool_choice: required
+    chat_template_kwargs:
+      enable_thinking: false

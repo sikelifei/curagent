@@ -1,0 +1,12 @@
+planner:
+  type: api
+  api:
+    # OpenAI-compatible DashScope endpoint for DeepSeek-V4-Flash.
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    model: deepseek-v4-flash
+    api_key_env: DASHSCOPE_API_KEY
+    temperature: 0.7
+    max_tokens: 2048
+    timeout: 120
+    native_tools: true
+    tool_choice: auto
